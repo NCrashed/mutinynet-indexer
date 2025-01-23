@@ -1,2 +1,6 @@
 [toolchain]
-channel = "1.84.0"
+# Rust analyzer breaks editor plugins in the current stable version (1.84), so we use pinned nightly for now 
+# https://github.com/rust-lang/rust-analyzer/issues/17608
+# channel = "1.84.0"
+channel = "nightly-2025-01-03"
+components = [ "rustfmt", "clippy", "rust-analyzer" ]
