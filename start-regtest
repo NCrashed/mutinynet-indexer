@@ -1,0 +1,66 @@
+#! /usr/bin/env nix-shell
+#! nix-shell -i bash -Q shell.nix
+DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
+# Function to check if a service is up
+check_service() {
+  local COMMAND=$1
+  local SLEEP_INTERVAL=$2
+  local MAX_ATTEMPTS=$3
+
+  local attempt=1
+
+  while [ $attempt -le $MAX_ATTEMPTS ]; do
+    echo "Attempt $attempt: Checking $URL"
+    
+    # Execute curl and check if it was successful
+    # Example of command curl --silent --fail $URL > /dev/null
+    if $COMMAND; then
+      echo "Service is up!"
+      return 0
+    else
+      echo "Service not available yet. Waiting for $SLEEP_INTERVAL seconds..."
+    fi
+
+    # Wait for the specified interval before the next check
+    sleep $SLEEP_INTERVAL
+
+    # Increment the attempt counter
+    attempt=$(( attempt + 1 ))
+  done
+
+  echo "Service did not become available after $(( MAX_ATTEMPTS * SLEEP_INTERVAL )) seconds."
+  return 1
+}
+
+SLEEP_INTERVAL=5
+MAX_ATTEMPTS=60
+
+echo "Starting Bitcoin Mutiny signet node"
+export BITCOIN_DATA=$DIR/data-bitcoind
+export BITCOIN_RPC_PORT=18443
+export BITCOIN_PORT=18444
+mkdir -p $BITCOIN_DATA
+# user: test, password: test
+bitcoind -chain=signet \
+  -datadir=$BITCOIN_DATA \
+  -daemon \
+  -fallbackfee=0.00001 \
+  -server \
+  -rpcallowip=127.0.0.1 \
+  -rpcbind=127.0.0.1:$BITCOIN_RPC_PORT \
+  -port=$BITCOIN_PORT \
+  -rpcauth=test:ba4391646a4ea8d970d99b29ee8994c3\$8b0f234e4c4c066bc9e87cf2af91bf88ed77607bfb25ea20ba852e06b30b7255 \
+  -signetchallenge=512102f7561d208dd9ae99bf497273e16f389bdbd6c4742ddb8e6b216e64fa2928ad8f51ae \
+  -addnode=45.79.52.207:38333 \
+  -dnsseed=0 \
+  -signetblocktime=30
+export BTC_CLI="bitcoin-cli -chain=signet -datadir=$BITCOIN_DATA -rpcport=$BITCOIN_RPC_PORT"
+check_service "$BTC_CLI getnetworkinfo" $SLEEP_INTERVAL $MAX_ATTEMPTS
+
+function finish_btc {
+    echo "Stopping bitcoin daemon 1 ..."
+    kill $(cat $BITCOIN_DATA/signet/bitcoind.pid)
+}
+trap finish_btc EXIT
+tail -f $BITCOIN_DATA/signet/debug.log
