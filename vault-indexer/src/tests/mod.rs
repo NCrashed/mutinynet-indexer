@@ -10,7 +10,7 @@ use crate::indexer::{Indexer, Network, NodeStatus};
 const NODE_ADDRESS: &'static str = "127.0.0.1:18444";
 
 #[test]
-// #[serial]
+#[serial]
 fn node_connection() {
     // Configure indexer and prepare to run
     let indexer = Arc::new(
