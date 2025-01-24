@@ -1,11 +1,13 @@
 use core::result::Result;
+use std::sync::mpmc::sync_channel;
+pub use bitcoin::Network;
+use event::EVENTS_CAPACITY;
 use thiserror::Error;
 
 use node::node_worker;
 
-use crate::Network;
-
 mod node; 
+mod event;
 
 /// All kind of errors the indexer can produce
 #[derive(Debug, Error)]
@@ -49,7 +51,9 @@ impl Indexer {
     /// Executes the internal threads (connection to the node, indexing worker) and awaits
     /// of their termination. Intended to be run in separate thread.
     pub fn run(&self) -> Result<(), Error> {
-        node_worker(&self.node_address, self.network, self.start_height)?;
+        let (events_sender, events_receiver) = sync_channel(EVENTS_CAPACITY);
+
+        node_worker(&self.node_address, self.network, self.start_height, events_sender, events_receiver)?;
         Ok(())
     }
 }
