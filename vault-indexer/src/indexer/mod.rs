@@ -1,17 +1,12 @@
 use core::result::Result;
 
+use crate::Network;
+
+mod node; 
+
 /// All kind of errors the indexer can produce
 #[derive(Debug)]
 pub enum Error {}
-
-/// Which network we run the indexer on
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Network {
-    /// Main network
-    Bitcoin,
-    /// Also includes Mutiny signet
-    Signet,
-}
 
 /// The possible state of connection to bitcoin node we have.
 ///
