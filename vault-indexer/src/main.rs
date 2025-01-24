@@ -1,7 +1,4 @@
-#[cfg(test)]
-mod tests;
-
-mod indexer; 
+use vault_indexer::*;
 
 fn main() {
 

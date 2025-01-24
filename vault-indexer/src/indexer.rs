@@ -1,5 +1,4 @@
-use core::{net::SocketAddr, result::Result};
-use std::net::ToSocketAddrs;
+use core::result::Result;
 
 /// All kind of errors the indexer can produce
 #[derive(Debug)]
