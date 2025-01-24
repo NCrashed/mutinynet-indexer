@@ -1,12 +1,18 @@
 use core::result::Result;
+use thiserror::Error;
+
+use node::node_worker;
 
 use crate::Network;
 
 mod node; 
 
 /// All kind of errors the indexer can produce
-#[derive(Debug)]
-pub enum Error {}
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("Node worker failure: {0}")]
+    Node(#[from] node::Error),
+}
 
 /// The possible state of connection to bitcoin node we have.
 ///
@@ -23,6 +29,7 @@ pub enum NodeStatus {
 pub struct Indexer {
     network: Network,
     node_address: String,
+    start_height: u32,
 }
 
 impl Indexer {
@@ -42,7 +49,8 @@ impl Indexer {
     /// Executes the internal threads (connection to the node, indexing worker) and awaits
     /// of their termination. Intended to be run in separate thread.
     pub fn run(&self) -> Result<(), Error> {
-        loop {}
+        node_worker(&self.node_address, self.network, self.start_height)?;
+        Ok(())
     }
 }
 
@@ -56,6 +64,7 @@ type LazyBuilder<T> = Box<dyn FnOnce() -> Result<T, Error>>;
 pub struct IndexerBuilder {
     network_builder: LazyBuilder<Network>,
     node_builder: LazyBuilder<String>,
+    start_height_builder: LazyBuilder<u32>,
 }
 
 impl IndexerBuilder {
@@ -63,6 +72,7 @@ impl IndexerBuilder {
         IndexerBuilder {
             network_builder: Box::new(|| Ok(Network::Bitcoin)),
             node_builder: Box::new(|| Ok("45.79.52.207:38333".to_owned())),
+            start_height_builder: Box::new(|| Ok(0)),
         }
     }
 
@@ -81,6 +91,7 @@ impl IndexerBuilder {
         Ok(Indexer {
             network: (self.network_builder)()?,
             node_address: (self.node_builder)()?,
+            start_height: (self.start_height_builder)()?,
         })
     }
 }

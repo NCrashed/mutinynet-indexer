@@ -10,7 +10,7 @@ use crate::Network;
 
 /// How we introduce ourselves to other nodes
 /// TODO: make configurable
-const DEFAULT_USER_AGENT: &str = "Vault indexer 0.1";
+const DEFAULT_USER_AGENT: &str = "Vault indexer 0.1.0";
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -24,12 +24,13 @@ pub enum Error {
     SendingMsg(String, Vec<u8>, std::io::Error),
 }
 
-pub fn node_worker(address: &str, network: Network, start_height: i32) -> Result<(), Error> {
+pub fn node_worker(address: &str, network: Network, start_height: u32) -> Result<(), Error> {
+    // TODO: add reconnection on connection, msg sending errors
     let stream = node_handshake(address, network, start_height)?;
     Ok(())
 }
 
-fn node_handshake(address: &str, network: Network, start_height: i32) -> Result<TcpStream, Error> {
+fn node_handshake(address: &str, network: Network, start_height: u32) -> Result<TcpStream, Error> {
     trace!("Resolving address to node {address}...");
     let mut sock_addrs = address
         .to_socket_addrs()
@@ -57,6 +58,6 @@ fn node_handshake(address: &str, network: Network, start_height: i32) -> Result<
 }
 
 // https://en.bitcoin.it/wiki/Protocol_documentation#version
-fn build_version_message(address: &SocketAddr, user_agent: &str, start_height: i32) -> Vec<u8> {
+fn build_version_message(address: &SocketAddr, user_agent: &str, start_height: u32) -> Vec<u8> {
     unimplemented!()
 }
