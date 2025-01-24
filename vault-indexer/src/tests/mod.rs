@@ -21,7 +21,7 @@ fn node_connection() {
     // Configure indexer and prepare to run
     let indexer = Arc::new(
         Indexer::builder()
-            .network(Network::Signet)
+            .network(Network::Mutinynet)
             .node(NODE_ADDRESS)
             .build()
             .expect("Indexer configured"),

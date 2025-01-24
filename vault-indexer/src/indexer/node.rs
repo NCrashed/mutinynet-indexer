@@ -288,6 +288,7 @@ fn receive_message(stream: &mut TcpStream, network: Network) -> Result<NetworkMe
     stream
         .read_exact(&mut header_buf)
         .map_err(Error::ReceivingHeader)?;
+    trace!("Received header");
     // Checking magic bytes
     let magic = &header_buf[0..4];
     let our_magic = network.magic().to_bytes();
@@ -298,15 +299,19 @@ fn receive_message(stream: &mut TcpStream, network: Network) -> Result<NetworkMe
     let payload_len_bytes = &header_buf[16..20];
     let payload_len =
         u32::from_le_bytes(payload_len_bytes.try_into().expect("statically known size"));
+    trace!("Payload size: {payload_len}");
+    
     // Get all payload
     let mut payload = vec![0u8; HEADER_SIZE + payload_len as usize];
     stream
         .read_exact(&mut payload[HEADER_SIZE..])
         .map_err(Error::ReceivingPayload)?;
+    trace!("Read payload");
     // Copy header into start of payload and parse
-    payload.copy_from_slice(&header_buf);
+    payload[0 .. HEADER_SIZE].copy_from_slice(&header_buf);
     let msg: RawNetworkMessage =
         consensus::deserialize(&payload).map_err(|e| Error::DecodingMessage(e, payload))?;
+    trace!("Deserialized message: {msg:?}");
     Ok(msg.into_payload())
 }
 

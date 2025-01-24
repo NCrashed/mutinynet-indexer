@@ -1,6 +1,6 @@
 use core::result::Result;
 use std::sync::mpmc::sync_channel;
-pub use bitcoin::Network;
+pub use network::Network;
 use event::EVENTS_CAPACITY;
 use thiserror::Error;
 
@@ -8,6 +8,7 @@ use node::node_worker;
 
 mod node; 
 mod event;
+mod network;
 
 /// All kind of errors the indexer can produce
 #[derive(Debug, Error)]

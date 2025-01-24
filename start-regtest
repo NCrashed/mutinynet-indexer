@@ -47,6 +47,9 @@ bitcoind -chain=signet \
   -daemon \
   -fallbackfee=0.00001 \
   -server \
+  -listen \
+  -bind=0.0.0.0 \
+  -debug \
   -rpcallowip=127.0.0.1 \
   -rpcbind=127.0.0.1:$BITCOIN_RPC_PORT \
   -port=$BITCOIN_PORT \
