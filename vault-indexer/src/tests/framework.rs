@@ -1,5 +1,6 @@
 use core::time::Duration;
 use std::sync::Arc;
+use std::sync::Once;
 use std::thread;
 
 use log::LevelFilter;
@@ -9,11 +10,15 @@ use crate::{Indexer, Network};
 /// Mutiny signet local node (run with `start-regtest`)
 const NODE_ADDRESS: &'static str = "127.0.0.1:18444";
 
+static INIT: Once = Once::new();
+
 pub fn init_indexer() -> Arc<Indexer> {
-    // Configure logging
-    env_logger::builder()
-        .filter(None, LevelFilter::Trace)
-        .init();
+    INIT.call_once(|| {
+        // Configure logging
+        env_logger::builder()
+            .filter(None, LevelFilter::Trace)
+            .init();
+    });
 
     // Configure indexer and prepare to run
     let indexer = Arc::new(

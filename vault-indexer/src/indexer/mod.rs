@@ -3,6 +3,7 @@ use core::{
     sync::atomic::{self, AtomicBool},
     time::Duration,
 };
+
 use event::{Event, EVENTS_CAPACITY};
 pub use network::Network;
 use std::sync::mpmc;
@@ -61,6 +62,11 @@ impl Indexer {
         } else {
             NodeStatus::Disconnected
         }
+    }
+
+    /// Get the height of known main chain of blocks we have sequence of headers for
+    pub fn chain_height(&self) -> u32 {
+        0
     }
 
     /// Executes the internal threads (connection to the node, indexing worker) and awaits
