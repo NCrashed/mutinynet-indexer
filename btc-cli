@@ -1,4 +1,5 @@
 #! /usr/bin/env nix-shell
 #! nix-shell -i bash -Q shell.nix
 DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-bitcoin-cli -chain=regtest -datadir=$DIR/data-bitcoind "$@"
+export BITCOIN_RPC_PORT=18443
+bitcoin-cli -chain=signet -datadir=$DIR/data-bitcoind -rpcport=$BITCOIN_RPC_PORT "$@"

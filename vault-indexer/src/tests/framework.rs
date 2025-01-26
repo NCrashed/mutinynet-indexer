@@ -5,6 +5,7 @@ use std::thread;
 
 use log::LevelFilter;
 
+use crate::db::Database;
 use crate::{Indexer, Network};
 
 /// Mutiny signet local node (run with `start-regtest`)
@@ -37,6 +38,17 @@ pub fn init_indexer() -> Arc<Indexer> {
     });
 
     indexer
+}
+
+pub fn init_db() -> Database {
+    INIT.call_once(|| {
+        // Configure logging
+        env_logger::builder()
+            .filter(None, LevelFilter::Trace)
+            .init();
+    });
+
+    Database::new(":memory:").expect("Database created")
 }
 
 /// Helper that polls the function for `count` times and waits for `delay` between calls.
