@@ -2,12 +2,14 @@ use bitcoin::{
     block::Header,
     consensus::{Decodable, Encodable},
     hashes::Hash,
-    BlockHash,
+    network, BlockHash,
 };
 use log::*;
 use sqlite::{Connection, ReadableWithIndex, State, Statement, Value};
 use std::{io::Cursor, path::Path};
 use thiserror::Error;
+
+use crate::Network;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -29,6 +31,8 @@ pub enum Error {
     EncodeHeader(bitcoin::io::Error),
     #[error("We encountered orphan block header {0} with no parent {1}")]
     OrphanBlock(BlockHash, BlockHash),
+    #[error("Query '{0}' should be executed by single step")]
+    ShouldExecuteOneRow(String),
 }
 
 /// Wraps SQlite connection and caches prepared statements
@@ -44,16 +48,16 @@ pub struct HeaderRecord {
 }
 
 impl Database {
-    pub fn new<P: AsRef<Path>>(filename: P) -> Result<Self, Error> {
+    pub fn new<P: AsRef<Path>>(filename: P, network: Network) -> Result<Self, Error> {
         trace!("Opening database {:?}", filename.as_ref());
         let connection = sqlite::open(filename).map_err(Error::Open)?;
         let mut db = Database { connection };
         trace!("Creation of schema");
-        db.initialize()?;
+        db.initialize(network)?;
         Ok(db)
     }
 
-    fn initialize(&mut self) -> Result<(), Error> {
+    fn initialize(&mut self, network: Network) -> Result<(), Error> {
         self.connection
             .execute(
                 "
@@ -76,18 +80,25 @@ impl Database {
             )
             .map_err(Error::CreateSchema)?;
 
+        // Store genesis hash to initiate main chain
+        let genesis = network.genesis_header();
+        if self.load_block_header(genesis.block_hash())?.is_none() {
+            let zero_hash = BlockHash::from_byte_array([0; 32]);
+            self.store_raw_header(genesis, 0, zero_hash, true)?;
+        }
         Ok(())
     }
 
     /// Find stored header record in the database
     pub fn load_block_header(&self, block_id: BlockHash) -> Result<Option<HeaderRecord>, Error> {
-        let query = "SELECT height, raw, in_longest FROM headers WHERE block_hash = ? LIMIT 1";
+        let query =
+            "SELECT height, raw, in_longest FROM headers WHERE block_hash = :block_hash LIMIT 1";
         let mut statement = self
             .connection
             .prepare(query)
             .map_err(Error::PrepareQuery)?;
         statement
-            .bind((1, block_id.to_string().as_str()))
+            .bind((":block_hash", &block_id.as_raw_hash().as_byte_array()[..]))
             .map_err(Error::BindQuery)?;
 
         if let State::Row = statement.next().map_err(Error::QueryNextRow)? {
@@ -117,6 +128,21 @@ impl Database {
                     header.prev_blockhash,
                 ))?;
 
+        self.store_raw_header(
+            header,
+            (parent_header.height + 1) as i64,
+            parent_header.header.block_hash(),
+            false,
+        )
+    }
+
+    fn store_raw_header(
+        &self,
+        header: Header,
+        height: i64,
+        prev_hash: BlockHash,
+        in_longest: bool,
+    ) -> Result<(), Error> {
         let query =
             "INSERT INTO headers VALUES(:block_hash, :height, :prev_block_hash, :raw, :in_longest)";
         let mut statement = self
@@ -136,21 +162,21 @@ impl Database {
                     ":block_hash",
                     header.block_hash().as_raw_hash().as_byte_array()[..].into(),
                 ),
-                (":height", (parent_header.height as i64).into()),
+                (":height", height.into()),
                 (
                     ":prev_block_hash",
-                    parent_header
-                        .header
-                        .block_hash()
-                        .as_raw_hash()
-                        .as_byte_array()[..]
-                        .into(),
+                    prev_hash.as_raw_hash().as_byte_array()[..].into(),
                 ),
                 (":raw", raw.into()),
+                (":in_longest", (if in_longest { 1 } else { 0 }).into()),
             ])
             .map_err(Error::BindQuery)?;
 
-        Ok(())
+        if let State::Done = statement.next().map_err(Error::QueryNextRow)? {
+            Ok(())
+        } else {
+            Err(Error::ShouldExecuteOneRow("insert header".to_owned()))
+        }
     }
 }
 

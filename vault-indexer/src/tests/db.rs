@@ -1,6 +1,7 @@
 use std::io::Cursor;
 
 use crate::tests::framework::*;
+use crate::Network;
 use bitcoin::block::Header;
 use bitcoin::consensus::Decodable;
 use serial_test::serial;
@@ -10,9 +11,7 @@ use serial_test::serial;
 fn db_genesis() {
     let db = init_db();
 
-    let genesis_header_bytes = hex::decode("0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a008f4d5fae77031e8ad22203").unwrap();
-    let genesis_header = Header::consensus_decode(&mut Cursor::new(&genesis_header_bytes)).unwrap();
-
+    let genesis_header = Network::Mutinynet.genesis_header();
     let read_header = db
         .load_block_header(genesis_header.block_hash())
         .unwrap()

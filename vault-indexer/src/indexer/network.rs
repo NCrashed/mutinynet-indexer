@@ -1,4 +1,15 @@
-use bitcoin::p2p::Magic;
+use std::io::Cursor;
+
+use bitcoin::{block::Header, consensus::Decodable, constants::genesis_block, p2p::Magic};
+
+// Extract from: btc-cli getblockheader 00000008819873e925422c1ff0f99f7cc9bbb232af63a077a480a3633bee1ef6 false
+const MUTINY_SIGNET_GENESIS_HEADER: [u8; 80] = [
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x3b, 0xa3, 0xed, 0xfd, 0x7a, 0x7b, 0x12, 0xb2, 0x7a, 0xc7, 0x2c, 0x3e,
+    0x67, 0x76, 0x8f, 0x61, 0x7f, 0xc8, 0x1b, 0xc3, 0x88, 0x8a, 0x51, 0x32, 0x3a, 0x9f, 0xb8, 0xaa,
+    0x4b, 0x1e, 0x5e, 0x4a, 0x00, 0x8f, 0x4d, 0x5f, 0xae, 0x77, 0x03, 0x1e, 0x8a, 0xd2, 0x22, 0x03,
+];
 
 /// Extended network enum that includes also the Mutiny signet
 #[derive(Copy, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
@@ -40,6 +51,21 @@ impl Network {
             Network::Signet => Magic::from(bitcoin::Network::Signet),
             Network::Regtest => Magic::from(bitcoin::Network::Regtest),
             Network::Mutinynet => Magic::from_bytes([0xa5, 0xdf, 0x2d, 0xcb]), // debug.log search for Signet derived magic (message start): a5df2dcb
+        }
+    }
+
+    /// Get header of genesis block for given chain
+    pub fn genesis_header(self) -> Header {
+        match self {
+            Network::Bitcoin => genesis_block(bitcoin::Network::Bitcoin).header,
+            Network::Testnet => genesis_block(bitcoin::Network::Testnet).header,
+            Network::Testnet4 => genesis_block(bitcoin::Network::Testnet4).header,
+            Network::Signet => genesis_block(bitcoin::Network::Signet).header,
+            Network::Regtest => genesis_block(bitcoin::Network::Regtest).header,
+            Network::Mutinynet => {
+                Header::consensus_decode(&mut Cursor::new(MUTINY_SIGNET_GENESIS_HEADER))
+                    .expect("Mutinynet genesis block decode")
+            }
         }
     }
 }

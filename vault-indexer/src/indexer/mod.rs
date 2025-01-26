@@ -170,12 +170,13 @@ impl IndexerBuilder {
 
     pub fn build(self) -> Result<Indexer, Error> {
         let db_path = (self.db_path_builder)()?;
+        let network = (self.network_builder)()?;
         Ok(Indexer {
-            network: (self.network_builder)()?,
+            network,
             node_address: (self.node_builder)()?,
             start_height: (self.start_height_builder)()?,
             node_connected: AtomicBool::new(false),
-            database: Arc::new(Mutex::new(Database::new(&db_path)?)),
+            database: Arc::new(Mutex::new(Database::new(&db_path, network)?)),
         })
     }
 }

@@ -48,7 +48,7 @@ pub fn init_db() -> Database {
             .init();
     });
 
-    Database::new(":memory:").expect("Database created")
+    Database::new(":memory:", Network::Mutinynet).expect("Database created")
 }
 
 /// Helper that polls the function for `count` times and waits for `delay` between calls.
