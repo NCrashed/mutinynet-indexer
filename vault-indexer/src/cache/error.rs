@@ -7,4 +7,6 @@ pub enum Error {
     Database(#[from] crate::db::Error),
     #[error("No header with hash: {0}")]
     MissingHeader(BlockHash),
+    #[error("We already has header (possible a loop in chain detected): {0}")]
+    AlreadyExisting(BlockHash),
 }
