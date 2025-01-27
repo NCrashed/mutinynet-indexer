@@ -2,6 +2,7 @@ use bitcoin::BlockHash;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("Failed to open database: {0}")]
     Open(sqlite::Error),

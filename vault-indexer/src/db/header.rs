@@ -115,7 +115,8 @@ impl DatabaseHeaders for Connection {
         in_longest: bool,
     ) -> Result<(), Error> {
         let query =
-            "INSERT INTO headers VALUES(:block_hash, :height, :prev_block_hash, :raw, :in_longest)";
+            "INSERT INTO headers VALUES(:block_hash, :height, :prev_block_hash, :raw, :in_longest)
+                ON CONFLICT(block_hash) DO UPDATE SET in_longest=excluded.in_longest";
 
         const HEADER_SIZE: usize = 80;
         let mut raw = vec![0u8; HEADER_SIZE];

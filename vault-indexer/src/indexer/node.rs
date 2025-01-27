@@ -26,6 +26,7 @@ use super::event::Event;
 const DEFAULT_USER_AGENT: &str = "Vault indexer 0.1.0";
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("Failed to send event to bus: {0}")]
     EventBusSend(#[from] SendError<Event>),

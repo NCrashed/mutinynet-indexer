@@ -24,6 +24,7 @@ mod node;
 
 /// All kind of errors the indexer can produce
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("Failed to read from events bus, disconnected.")]
     EventBusRecv,
