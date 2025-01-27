@@ -123,6 +123,9 @@ impl HeadersCache {
                 self.store_inactive(new_chain)?;
             }
         }
+        
+        // Now we can retry orphans after new blocks arrived
+        self.process_orphans()?;
         Ok(())
     }
 
@@ -198,6 +201,7 @@ impl HeadersCache {
                     in_longest: true,
                 };
                 self.headers.insert(hash, new_record.clone());
+                self.orphans.remove(&hash);
                 self.dirty.push(hash);
                 prev_record = new_record;
             }
@@ -224,9 +228,29 @@ impl HeadersCache {
                     in_longest: false,
                 };
                 self.headers.insert(hash, new_record.clone());
+                self.orphans.remove(&hash);
                 self.dirty.push(hash);
                 prev_record = new_record;
             }
+        }
+        Ok(())
+    }
+
+    /// Retry orphans headers and try to add them to the main graph 
+    fn process_orphans(&mut self) -> Result<(), Error> {
+        let mut removed_orphans: Vec<BlockHash> = vec![];
+        let mut adopted_oprhans = vec![];
+        for orphan in self.orphans.values().cloned() {
+            if self.headers.contains_key(&orphan.prev_blockhash) {
+                adopted_oprhans.push(orphan);
+                removed_orphans.push(orphan.block_hash());
+            }
+        }
+        for orphan in adopted_oprhans {
+            self.update_longest_chain(&[orphan])?;
+        }
+        for orphan in removed_orphans {
+            self.orphans.remove(&orphan);
         }
         Ok(())
     }
