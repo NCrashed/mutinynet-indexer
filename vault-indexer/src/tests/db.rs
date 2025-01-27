@@ -1,5 +1,6 @@
 use std::io::Cursor;
 
+use crate::db::*;
 use crate::tests::framework::*;
 use crate::Network;
 use bitcoin::block::Header;

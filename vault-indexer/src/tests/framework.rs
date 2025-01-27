@@ -4,8 +4,9 @@ use std::sync::Once;
 use std::thread;
 
 use log::LevelFilter;
+use sqlite::Connection;
 
-use crate::db::Database;
+use crate::db::initialize_db;
 use crate::{Indexer, Network};
 
 /// Mutiny signet local node (run with `start-regtest`)
@@ -40,7 +41,7 @@ pub fn init_indexer() -> Arc<Indexer> {
     indexer
 }
 
-pub fn init_db() -> Database {
+pub fn init_db() -> Connection {
     INIT.call_once(|| {
         // Configure logging
         env_logger::builder()
@@ -48,7 +49,7 @@ pub fn init_db() -> Database {
             .init();
     });
 
-    Database::new(":memory:", Network::Mutinynet).expect("Database created")
+    initialize_db(":memory:", Network::Mutinynet).expect("Database created")
 }
 
 /// Helper that polls the function for `count` times and waits for `delay` between calls.

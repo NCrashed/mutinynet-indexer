@@ -6,13 +6,17 @@ use core::{
 
 use event::{Event, EVENTS_CAPACITY};
 pub use network::Network;
-use std::{path::{Path, PathBuf}, sync::{mpmc, Mutex, Arc}};
+use sqlite::Connection;
+use std::{
+    path::{Path, PathBuf},
+    sync::{mpmc, Arc, Mutex},
+};
 use std::{sync::mpmc::sync_channel, thread};
 use thiserror::Error;
 
 use node::node_worker;
 
-use crate::db::{self, Database};
+use crate::db::{self, initialize_db};
 
 mod event;
 mod network;
@@ -46,7 +50,7 @@ pub struct Indexer {
     node_address: String,
     start_height: u32,
     node_connected: AtomicBool,
-    database: Arc<Mutex<Database>>,
+    database: Arc<Mutex<Connection>>,
 }
 
 impl Indexer {
@@ -176,7 +180,7 @@ impl IndexerBuilder {
             node_address: (self.node_builder)()?,
             start_height: (self.start_height_builder)()?,
             node_connected: AtomicBool::new(false),
-            database: Arc::new(Mutex::new(Database::new(&db_path, network)?)),
+            database: Arc::new(Mutex::new(initialize_db(&db_path, network)?)),
         })
     }
 }

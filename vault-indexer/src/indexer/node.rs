@@ -300,7 +300,7 @@ fn receive_message(stream: &mut TcpStream, network: Network) -> Result<NetworkMe
     let payload_len =
         u32::from_le_bytes(payload_len_bytes.try_into().expect("statically known size"));
     trace!("Payload size: {payload_len}");
-    
+
     // Get all payload
     let mut payload = vec![0u8; HEADER_SIZE + payload_len as usize];
     stream
@@ -308,7 +308,7 @@ fn receive_message(stream: &mut TcpStream, network: Network) -> Result<NetworkMe
         .map_err(Error::ReceivingPayload)?;
     trace!("Read payload");
     // Copy header into start of payload and parse
-    payload[0 .. HEADER_SIZE].copy_from_slice(&header_buf);
+    payload[0..HEADER_SIZE].copy_from_slice(&header_buf);
     let msg: RawNetworkMessage =
         consensus::deserialize(&payload).map_err(|e| Error::DecodingMessage(e, payload))?;
     trace!("Deserialized message: {msg:?}");
