@@ -6,6 +6,7 @@ use bitcoin::{
 };
 use log::*;
 use sqlite::{Connection, ReadableWithIndex, State, Statement, Value};
+use core::unimplemented;
 use std::{io::Cursor, path::Path};
 use thiserror::Error;
 
@@ -177,6 +178,11 @@ impl Database {
         } else {
             Err(Error::ShouldExecuteOneRow("insert header".to_owned()))
         }
+    }
+
+    /// Get current best main chain
+    pub fn get_main_tip(&self) -> Result<BlockHash, Error> {
+        unimplemented!()
     }
 }
 
