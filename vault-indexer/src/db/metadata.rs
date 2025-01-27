@@ -13,6 +13,9 @@ pub trait DatabaseMeta {
     /// Get current best main chain
     fn get_main_tip(&self) -> Result<BlockHash, Error>;
 
+    /// Update the head of the chain with largest PoW work
+    fn set_best_tip(&self, tip: BlockHash) -> Result<(), Error>;
+
     /// Returns true if we have single row in metadata table
     fn has_metadata(&self) -> Result<bool, Error>;
 
@@ -24,13 +27,17 @@ pub trait DatabaseMeta {
 }
 
 impl DatabaseMeta for Connection {
-    /// Get current best main chain
     fn get_main_tip(&self) -> Result<BlockHash, Error> {
         let meta = self.load_metada()?;
         Ok(meta.tip_block_hash)
     }
 
-    /// Returns true if we have single row in metadata table
+    fn set_best_tip(&self, tip: BlockHash) -> Result<(), Error> {
+        let mut meta = self.load_metada()?;
+        meta.tip_block_hash = tip; 
+        self.store_metadata(&meta)
+    }
+
     fn has_metadata(&self) -> Result<bool, Error> {
         let query = "SELECT count(id) as count FROM metadata";
         let mut statement = self.prepare(query).map_err(Error::PrepareQuery)?;
@@ -43,7 +50,6 @@ impl DatabaseMeta for Connection {
         }
     }
 
-    // Update metadata table
     fn store_metadata(&self, meta: &DbMetadata) -> Result<(), Error> {
         let query = "INSERT INTO metadata VALUES(0, :tip_block_hash)
                     ON CONFLICT(id) DO UPDATE SET tip_block_hash=excluded.tip_block_hash";
@@ -57,7 +63,6 @@ impl DatabaseMeta for Connection {
         )
     }
 
-    // Fetch all metadata from table
     fn load_metada(&self) -> Result<DbMetadata, Error> {
         let query = "SELECT * FROM metadata LIMIT 1";
         let mut statement = self.prepare(query).map_err(Error::PrepareQuery)?;

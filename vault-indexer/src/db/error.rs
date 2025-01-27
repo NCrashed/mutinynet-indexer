@@ -19,6 +19,8 @@ pub enum Error {
     DecodeHeader(bitcoin::consensus::encode::Error),
     #[error("Cannot encode Bitcoin header: {0}")]
     EncodeHeader(bitcoin::io::Error),
+    #[error("Missing header for block: {0}")]
+    MissingHeader(BlockHash),
     #[error("We encountered orphan block header {0} with no parent {1}")]
     OrphanBlock(BlockHash, BlockHash),
     #[error("Query '{0}' should be executed by single step")]

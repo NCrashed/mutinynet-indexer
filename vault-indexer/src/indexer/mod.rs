@@ -16,7 +16,7 @@ use thiserror::Error;
 
 use node::node_worker;
 
-use crate::db::{self, initialize_db};
+use crate::{cache::headers::HeadersCache, db::{self, initialize_db}};
 
 mod event;
 mod network;
@@ -31,6 +31,8 @@ pub enum Error {
     Node(#[from] node::Error),
     #[error("Database failure: {0}")]
     Database(#[from] db::Error),
+    #[error("Cache error: {0}")]
+    Cache(#[from] crate::cache::Error),
 }
 
 /// The possible state of connection to bitcoin node we have.
@@ -51,6 +53,7 @@ pub struct Indexer {
     start_height: u32,
     node_connected: AtomicBool,
     database: Arc<Mutex<Connection>>,
+    headers_cache: Arc<Mutex<HeadersCache>>,
 }
 
 impl Indexer {
@@ -175,12 +178,15 @@ impl IndexerBuilder {
     pub fn build(self) -> Result<Indexer, Error> {
         let db_path = (self.db_path_builder)()?;
         let network = (self.network_builder)()?;
+        let database = initialize_db(&db_path, network)?;
+        let headers_cache = HeadersCache::load(&database)?;
         Ok(Indexer {
             network,
             node_address: (self.node_builder)()?,
             start_height: (self.start_height_builder)()?,
             node_connected: AtomicBool::new(false),
-            database: Arc::new(Mutex::new(initialize_db(&db_path, network)?)),
+            database: Arc::new(Mutex::new(database)),
+            headers_cache: Arc::new(Mutex::new(headers_cache)),
         })
     }
 }

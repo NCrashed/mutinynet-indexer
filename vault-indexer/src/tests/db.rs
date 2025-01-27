@@ -1,5 +1,6 @@
 use std::io::Cursor;
 
+use crate::cache::headers::HeadersCache;
 use crate::db::*;
 use crate::tests::framework::*;
 use crate::Network;
@@ -42,15 +43,15 @@ fn db_store_header() {
 #[serial]
 fn db_main_tip() {
     let db = init_db();
+    let mut cache = HeadersCache::load(&db).unwrap();
 
     let test_header1 = mk_header(HEADER_HEIGHT_1);
     let test_header2 = mk_header(HEADER_HEIGHT_2);
 
-    db.store_block_header(test_header1).unwrap();
-    db.store_block_header(test_header2).unwrap();
-
+    cache.update_longest_chain(&[test_header1, test_header2]).unwrap();
+    cache.store(&db).unwrap();
+    
     let tip_hash = db.get_main_tip().unwrap();
-
     assert_eq!(test_header2.block_hash(), tip_hash);
 }
 

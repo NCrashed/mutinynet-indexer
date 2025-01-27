@@ -7,6 +7,7 @@ use bitcoin::{
     BlockHash,
 };
 use sqlite::{Connection, State, Value};
+use core::ops::FnMut;
 use std::io::Cursor;
 
 #[derive(Debug, Clone)]
@@ -19,6 +20,10 @@ pub struct HeaderRecord {
 pub trait DatabaseHeaders {
     /// Find stored header record in the database
     fn load_block_header(&self, block_id: BlockHash) -> Result<Option<HeaderRecord>, Error>;
+
+    /// Iterate all stored headers and call a closure for them
+    fn load_block_headers<F>(&self, body: F) -> Result<(), Error>
+        where F: FnMut(HeaderRecord) -> ();
 
     /// Stores the header in the database, doesn't mark it as longest chain, but checks that we have the parent in place.
     fn store_block_header(&self, header: Header) -> Result<(), Error> {
@@ -36,6 +41,7 @@ pub trait DatabaseHeaders {
             parent_header.header.block_hash(),
             false,
         )
+        // self.update_longest_chain(header.block_hash())
     }
 
     /// Stores the header without checking that we have the parent in the database
@@ -74,6 +80,31 @@ impl DatabaseHeaders for Connection {
         } else {
             Ok(None)
         }
+    }
+
+    fn load_block_headers<F>(&self, mut body: F) -> Result<(), Error>
+            where F: FnMut(HeaderRecord) -> () 
+    {
+        let query =
+            "SELECT height, raw, in_longest FROM headers";
+        let mut statement = self.prepare(query).map_err(Error::PrepareQuery)?;
+
+        while let State::Row = statement.next().map_err(Error::QueryNextRow)? {
+            let height = statement.read_field::<i64>("height")?;
+            let raw_header = statement.read_field::<Vec<u8>>("raw")?;
+            let in_longest = statement.read_field::<i64>("in_longest")?;
+
+            let mut header_cursor = Cursor::new(raw_header);
+            let header =
+                Header::consensus_decode(&mut header_cursor).map_err(Error::DecodeHeader)?;
+            let record = HeaderRecord {
+                header,
+                height: height as u32,
+                in_longest: in_longest != 0,
+            };
+            body(record)
+        }
+        Ok(())
     }
 
     fn store_raw_header(
