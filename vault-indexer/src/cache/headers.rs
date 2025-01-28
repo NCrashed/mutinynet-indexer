@@ -1,6 +1,6 @@
 use super::error::Error;
 use crate::db::{DatabaseHeaders, DatabaseMeta, HeaderRecord};
-use bitcoin::{block::Header, BlockHash, Work};
+use bitcoin::{block::Header, hashes::Hash, BlockHash, Work};
 use core::{fmt::Display, iter::Iterator};
 use log::*;
 use sqlite::Connection;
@@ -9,6 +9,8 @@ use std::collections::HashMap;
 pub struct HeadersCache {
     headers: HashMap<BlockHash, HeaderRecord>,
     best_tip: BlockHash,
+    height: u32,
+    main_chain: Vec<BlockHash>,
     dirty: Vec<BlockHash>,
     orphans: HashMap<BlockHash, Header>,
 }
@@ -21,12 +23,35 @@ impl HeadersCache {
             headers.insert(record.header.block_hash(), record);
         })?;
         let best_tip = conn.get_main_tip()?;
-        Ok(HeadersCache {
+        let mut cache = HeadersCache {
             headers,
             best_tip,
+            height: 0,
+            main_chain: vec![],
             dirty: vec![],
             orphans: HashMap::new(),
-        })
+        };
+        cache.fill_main_chain()?;
+        Ok(cache)
+    }
+
+    fn fill_main_chain(&mut self) -> Result<(), Error> {
+        let tip_record = self.get_header(self.best_tip)?.clone();
+        let empty_hash = BlockHash::from_byte_array([0u8; 32]);
+        self.height = tip_record.height;
+        self.main_chain.resize(tip_record.height as usize + 1, empty_hash);
+        
+        let mut current_record = tip_record;
+        loop {
+            let curr_height = current_record.height;
+            self.main_chain[curr_height as usize] = current_record.header.block_hash();
+            if current_record.height == 0 {
+                break;
+            }
+            current_record = self.get_header(current_record.header.prev_blockhash)?.clone();
+            assert_eq!(curr_height, current_record.height+1);
+        }
+        Ok(())
     }
 
     /// Dump all dirty parts of cache to the database
@@ -46,6 +71,33 @@ impl HeadersCache {
         }
         self.dirty = vec![];
         Ok(())
+    }
+
+    /// Query the header in the cache. Doesn't gurantee that the header in the main chain
+    pub fn get_header(&self, hash: BlockHash) -> Result<&HeaderRecord, Error> {
+        self.headers.get(&hash).ok_or(Error::MissingHeader(hash))
+    }
+
+    /// Get the block hash that is in main chain in the given height
+    pub fn get_blockhash_at(&self, height: u32) -> Option<BlockHash> {
+        self.main_chain.get(height as usize).cloned()
+    }
+
+    /// Get the Bitcoin core locator of current main chain.
+    ///
+    /// The locator is list of hashes that is sampled across the chain
+    /// and helps to identify which chain extension we want to ask from
+    /// remote peer.
+    pub fn get_locator_main_chain(&self) -> Result<Vec<BlockHash>, Error> {
+        let mut hashes = vec![];
+        let heights = get_locator_heights(self.height);
+        for i in heights {
+            let hash = self
+                .get_blockhash_at(i)
+                .ok_or(Error::MissingHeaderHeight(i))?;
+            hashes.push(hash);
+        }
+        Ok(hashes)
     }
 
     /// Checks if the given header chain extends the longest chain and saves metadata.
@@ -123,7 +175,7 @@ impl HeadersCache {
                 self.store_inactive(new_chain)?;
             }
         }
-        
+
         // Now we can retry orphans after new blocks arrived
         self.process_orphans()?;
         Ok(())
@@ -161,7 +213,7 @@ impl HeadersCache {
 
     /// Mark all the headers from given chain (except the root) as inactive
     fn inactivate(&mut self, chain: &HeaderChain) -> Result<(), Error> {
-        for header in chain.headers() {
+        for header in chain.headers().skip(1) {
             let hash = header.block_hash();
             let header_record = self
                 .headers
@@ -170,6 +222,10 @@ impl HeadersCache {
             header_record.in_longest = false;
             self.dirty.push(hash);
         }
+        let root_record = self.get_header(chain.root_hash())?.clone();
+        self.best_tip = root_record.header.block_hash();
+        self.height = root_record.height;
+        self.main_chain.truncate(self.height as usize);
         Ok(())
     }
 
@@ -182,6 +238,11 @@ impl HeadersCache {
             .get(&root_hash)
             .ok_or(Error::MissingHeader(root_hash))?
             .clone();
+        let start_height = prev_record.height;
+        let new_height = start_height + chain.len() as u32 - 1;
+        let zero_hash = BlockHash::from_byte_array([0u8; 32]);
+        self.main_chain.resize(new_height as usize + 1, zero_hash);
+        
         for header in chain.headers() {
             let hash = header.block_hash();
             if self.headers.contains_key(&hash) {
@@ -191,23 +252,29 @@ impl HeadersCache {
                     .get_mut(&hash)
                     .ok_or(Error::MissingHeader(hash))?;
                 header_record.in_longest = true;
+                self.main_chain[header_record.height as usize] = hash;
                 self.dirty.push(hash);
                 prev_record = header_record.clone();
             } else {
                 // insert new
+                let height = prev_record.height + 1;
                 let new_record = HeaderRecord {
                     header,
-                    height: prev_record.height + 1,
+                    height,
                     in_longest: true,
                 };
                 self.headers.insert(hash, new_record.clone());
+                self.main_chain[height as usize] = hash;
                 self.orphans.remove(&hash);
                 self.dirty.push(hash);
                 prev_record = new_record;
             }
         }
+
         trace!("Make the best tip as: {}", chain.tip_hash());
         self.best_tip = chain.tip_hash();
+        self.height = new_height;
+
         Ok(())
     }
 
@@ -236,7 +303,7 @@ impl HeadersCache {
         Ok(())
     }
 
-    /// Retry orphans headers and try to add them to the main graph 
+    /// Retry orphans headers and try to add them to the main graph
     fn process_orphans(&mut self) -> Result<(), Error> {
         let mut removed_orphans: Vec<BlockHash> = vec![];
         let mut adopted_oprhans = vec![];
@@ -282,6 +349,10 @@ impl HeaderChain {
             trunk_rev: vec![],
             trunk_for: vec![],
         }
+    }
+
+    pub fn len(&self) -> usize {
+        1 + self.trunk_rev.len() + self.trunk_for.len()
     }
 
     /// Add headers to the end of the chain, fails if the first header references
@@ -350,4 +421,21 @@ impl HeaderChain {
             .chain(self.trunk_rev.iter().rev().cloned())
             .chain(self.trunk_for.iter().cloned())
     }
+}
+
+/// We sample block hashes exponentionally (^2) from the tip of the chain
+fn get_locator_heights(height: u32) -> Vec<u32> {
+    let mut is = vec![];
+    let mut step = 1;
+    let mut i = height as i32;
+    while i > 0 {
+        if is.len() >= 10 {
+            // chain is too short from genesis
+            step *= 2;
+        }
+        is.push(i as u32);
+        i -= step;
+    }
+    is.push(0);
+    is
 }

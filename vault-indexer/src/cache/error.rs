@@ -8,6 +8,8 @@ pub enum Error {
     Database(#[from] crate::db::Error),
     #[error("No header with hash: {0}")]
     MissingHeader(BlockHash),
+    #[error("No header at the height: {0}")]
+    MissingHeaderHeight(u32),
     #[error("We already has header (possible a loop in chain detected): {0}")]
     AlreadyExisting(BlockHash),
     #[error("Cannot extend chain tip {0} with the header {1}, parent doesn't match")]
