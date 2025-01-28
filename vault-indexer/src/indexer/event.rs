@@ -14,4 +14,6 @@ pub enum Event {
     IncomingMessage(NetworkMessage),
     /// We want to send a message to node
     OutcomingMessage(NetworkMessage),
+    /// Event to terminate internal workers
+    Termination,
 }

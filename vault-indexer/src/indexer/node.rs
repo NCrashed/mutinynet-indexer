@@ -185,6 +185,19 @@ fn node_process(
                 Err(e) => return (Err(e), events_receiver),
                 Ok(()) => (),
             },
+            Ok(Event::Termination) => {
+                // Notify other threads that we are done
+                stop_flag.store(true, atomic::Ordering::Relaxed);
+                // Shutdown socket to force unblocking operations on it, ignore error here if occurs
+                if let Err(e) = stream
+                    .shutdown(Shutdown::Both)
+                    .map_err(Error::SocketShutdownFail)
+                {
+                    error!("At shutdown procedure we got {e}");
+                }
+
+                return (Ok(()), events_receiver);
+            }
             _ => (),
         }
     }

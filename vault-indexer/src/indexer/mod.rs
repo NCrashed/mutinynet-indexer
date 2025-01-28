@@ -1,8 +1,4 @@
-use bitcoin::{
-    hashes::Hash,
-    p2p::{message::NetworkMessage, message_blockdata::GetHeadersMessage},
-    BlockHash,
-};
+use bitcoin::p2p::message::NetworkMessage;
 use bus::Bus;
 use core::{
     result::Result,
@@ -61,6 +57,9 @@ pub enum NodeStatus {
     Connected,
 }
 
+/// Seconds between requests for new headers
+const REQUEST_HEADERS_DELAY: u64 = 10;
+
 /// The core object that holds all resources of the indexer server. The main object
 /// the user of the code should interact with.
 pub struct Indexer {
@@ -101,7 +100,7 @@ impl Indexer {
             .get_current_height())
     }
 
-    /// Get the height we already have scanned 
+    /// Get the height we already have scanned
     pub fn scanned_height(&self) -> Result<u32, Error> {
         Ok(self.start_height)
     }
@@ -113,9 +112,11 @@ impl Indexer {
         let (events_sender, events_receiver) = sync_channel(EVENTS_CAPACITY);
         // Make events fan-out
         let mut events_bus = Bus::new(EVENTS_CAPACITY);
-
+        // Register all readers of events in advance
         let node_receiver = events_bus.add_rx();
         let mut main_receiver = events_bus.add_rx();
+        // Make a flag to terminate threads after the main runner exits 
+        let stop_flag = Arc::new(AtomicBool::new(false));
 
         // Connect fain-in and fan-out through dispatcher thread
         thread::spawn(move || {
@@ -142,9 +143,34 @@ impl Indexer {
             })
         };
 
+        // Worker that requests headers periodically
+        thread::spawn({
+            let headers_cache = self.headers_cache.clone();
+            let events_sender = events_sender.clone();
+            let stop_flag = stop_flag.clone();
+            move || -> Result<(), Error> {
+                loop {
+                    if stop_flag.load(atomic::Ordering::Relaxed) {
+                        break Ok(());
+                    }
+                    trace!("Requesting new headers");
+                    thread::sleep(Duration::from_secs(REQUEST_HEADERS_DELAY));
+                    let headers_msg = {
+                        let cache = headers_cache.lock().map_err(|_| Error::HeadersCacheLock)?;
+                        cache.make_get_headers()?
+                    };
+                    events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
+                        headers_msg,
+                    )))?
+                }
+            }
+        });
+
         loop {
             // Terminate if node worker ends with unrecoverable error
             if node_handle.is_finished() {
+                stop_flag.store(true, atomic::Ordering::Relaxed);
+                events_sender.send(Event::Termination)?;
                 let res = node_handle.join();
                 match res {
                     Ok(Ok(_)) => break, // termination
@@ -155,13 +181,21 @@ impl Indexer {
 
             match main_receiver.recv_timeout(Duration::from_millis(100)) {
                 Err(mpmc::RecvTimeoutError::Timeout) => (), // take a chance to check termination
-                Err(mpmc::RecvTimeoutError::Disconnected) => return Err(Error::EventBusRecv),
+                Err(mpmc::RecvTimeoutError::Disconnected) => {
+                    stop_flag.store(true, atomic::Ordering::Relaxed);
+                    events_sender.send(Event::Termination)?;
+                    return Err(Error::EventBusRecv);
+                }
                 Ok(Event::Handshaked) => {
                     self.node_connected.store(true, atomic::Ordering::Relaxed);
 
                     // start requesting headers
                     trace!("Requesting first headers");
-                    let headers_msg = self.make_get_headers()?;
+                    let cache = self
+                        .headers_cache
+                        .lock()
+                        .map_err(|_| Error::HeadersCacheLock)?;
+                    let headers_msg = cache.make_get_headers()?;
                     events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
                         headers_msg,
                     )))?
@@ -188,7 +222,13 @@ impl Indexer {
                         }
 
                         if headers.len() == MAX_HEADERS_PER_MSG {
-                            let headers_msg = self.make_get_headers()?;
+                            let headers_msg = {
+                                let cache = self
+                                    .headers_cache
+                                    .lock()
+                                    .map_err(|_| Error::HeadersCacheLock)?;
+                                cache.make_get_headers()?
+                            };
                             events_sender.send(Event::OutcomingMessage(
                                 NetworkMessage::GetHeaders(headers_msg),
                             ))?
@@ -196,22 +236,11 @@ impl Indexer {
                     }
                     _ => (),
                 },
-                e => (),
+                _ => (),
             }
         }
 
         Ok(())
-    }
-
-    fn make_get_headers(&self) -> Result<GetHeadersMessage, Error> {
-        let stop_hash = BlockHash::from_byte_array([0u8; 32]);
-        let locator_hashes = self
-            .headers_cache
-            .lock()
-            .map_err(|_| Error::HeadersCacheLock)?
-            .get_locator_main_chain()?;
-        let headers_msg = GetHeadersMessage::new(locator_hashes, stop_hash);
-        Ok(headers_msg)
     }
 }
 

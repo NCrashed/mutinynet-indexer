@@ -1,6 +1,6 @@
 use super::error::Error;
 use crate::db::{DatabaseHeaders, DatabaseMeta, HeaderRecord};
-use bitcoin::{block::Header, hashes::Hash, BlockHash, Work};
+use bitcoin::{block::Header, hashes::Hash, p2p::message_blockdata::GetHeadersMessage, BlockHash, Work};
 use core::{fmt::Display, iter::Iterator};
 use log::*;
 use sqlite::Connection;
@@ -101,6 +101,15 @@ impl HeadersCache {
             hashes.push(hash);
         }
         Ok(hashes)
+    }
+    
+    /// Construct a message to node to request next headers from head
+    pub fn make_get_headers(&self) -> Result<GetHeadersMessage, Error> {
+        let stop_hash = BlockHash::from_byte_array([0u8; 32]);
+        let locator_hashes = self
+            .get_locator_main_chain()?;
+        let headers_msg = GetHeadersMessage::new(locator_hashes, stop_hash);
+        Ok(headers_msg)
     }
 
     /// Get current main chain height
