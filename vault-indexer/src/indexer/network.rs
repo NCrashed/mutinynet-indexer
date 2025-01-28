@@ -1,5 +1,5 @@
-use std::io::Cursor;
 use clap::ValueEnum;
+use std::io::Cursor;
 
 use bitcoin::{block::Header, consensus::Decodable, constants::genesis_block, p2p::Magic};
 

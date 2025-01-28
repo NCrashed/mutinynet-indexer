@@ -186,9 +186,10 @@ fn node_process(
             Ok(Event::OutcomingMessage(msg)) => {
                 debug!("Got message to send");
                 match send_message(&mut stream, network, msg) {
-                Err(e) => return (Err(e), events_receiver),
-                Ok(()) => (),
-            }},
+                    Err(e) => return (Err(e), events_receiver),
+                    Ok(()) => (),
+                }
+            }
             Ok(Event::Termination) => {
                 // Notify other threads that we are done
                 stop_flag.store(true, atomic::Ordering::Relaxed);
@@ -208,7 +209,11 @@ fn node_process(
 }
 
 // Connect to node and do all handshake protocol (version exchange and verack messages)
-fn node_handshake(address: &str, network: Network, start_height: u32) -> Result<(TcpStream, u32), Error> {
+fn node_handshake(
+    address: &str,
+    network: Network,
+    start_height: u32,
+) -> Result<(TcpStream, u32), Error> {
     debug!("Resolving address to node {address}...");
     let mut sock_addrs = address
         .to_socket_addrs()

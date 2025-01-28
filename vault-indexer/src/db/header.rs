@@ -6,7 +6,11 @@ use bitcoin::{
     BlockHash,
 };
 use core::ops::FnMut;
-use rusqlite::{named_params, types::Type, Connection};
+use rusqlite::{
+    named_params, params_from_iter,
+    types::{Type, Value},
+    Connection,
+};
 use std::io::Cursor;
 
 #[derive(Debug, Clone)]
@@ -79,23 +83,24 @@ impl DatabaseHeaders for Connection {
     {
         let query = "SELECT height, raw, in_longest FROM headers";
         let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
-        let result = statement.query_map([], |row| {
-            let height = row.get::<_, i64>(0)?;
-            let raw_header = row.get::<_, Vec<u8>>(1)?;
-            let in_longest = row.get::<_, i64>(2)?;
+        let result = statement
+            .query_map([], |row| {
+                let height = row.get::<_, i64>(0)?;
+                let raw_header = row.get::<_, Vec<u8>>(1)?;
+                let in_longest = row.get::<_, i64>(2)?;
 
-            let mut header_cursor = Cursor::new(raw_header);
-            let header =
-                Header::consensus_decode(&mut header_cursor).map_err(|e| {
+                let mut header_cursor = Cursor::new(raw_header);
+                let header = Header::consensus_decode(&mut header_cursor).map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(1, Type::Blob, Box::new(e))
                 })?;
-            let record = HeaderRecord {
-                header,
-                height: height as u32,
-                in_longest: in_longest != 0,
-            };
-            Ok(record)
-        }).map_err(Error::ExecuteQuery)?;
+                let record = HeaderRecord {
+                    header,
+                    height: height as u32,
+                    in_longest: in_longest != 0,
+                };
+                Ok(record)
+            })
+            .map_err(Error::ExecuteQuery)?;
 
         for record in result {
             body(record.map_err(Error::FetchRow)?)
@@ -104,62 +109,74 @@ impl DatabaseHeaders for Connection {
     }
 
     fn store_raw_headers(&mut self, headers: &[(Header, i64, bool)]) -> Result<(), Error> {
-        let tx = self.transaction().map_err(Error::StartTransaction)?; // Начинаем транзакцию
+        // Size for one batch, tuned manually
+        const BATCH_SIZE: usize = 500;
 
-        tx.execute_batch(r#"
-            PRAGMA temp_store = 2; -- Store in internal CPU cache
-            CREATE TEMP TABLE IF NOT EXISTS temp_headers (
-                block_hash BLOB PRIMARY KEY NOT NULL,
-                height INTEGER NOT NULL,
-                prev_block_hash BLOB NOT NULL,
-                raw BLOB NOT NULL,
-                in_longest INTEGER NOT NULL
-            );
-            -- Clean to avoid messing with old values
-            DELETE FROM temp_headers;
-        "#
-        ).map_err(Error::ExecuteQuery)?;
+        // The shared transaction for all batches
+        let tx = self.transaction().map_err(Error::StartTransaction)?;
 
-        {
-            let insert_temp = r#"
-                INSERT INTO temp_headers
-                    (block_hash, height, prev_block_hash, raw, in_longest)
+        let mut start = 0;
+        while start < headers.len() {
+            let end = (start + BATCH_SIZE).min(headers.len());
+            let batch = &headers[start..end];
+
+            // Start making the batched SQL query
+            let mut sql = String::from(
+                r#"
+                INSERT INTO headers (block_hash, height, prev_block_hash, raw, in_longest)
                 VALUES
-                    (:block_hash, :height, :prev_block_hash, :raw, :in_longest)
-            "#;
-    
-            let mut stmt = tx.prepare_cached(insert_temp).map_err(Error::PrepareQuery)?;
-    
-            for (header, height, in_longest) in headers {
+                "#,
+            );
+
+            // Collecting N parts "(?, ?, ?, ?, ?)" batch.len() times
+            let mut values_placeholders = Vec::with_capacity(batch.len());
+            for _ in batch {
+                values_placeholders.push("(?, ?, ?, ?, ?)".to_string());
+            }
+            sql.push_str(&values_placeholders.join(", "));
+
+            // Finish query with on conflict part
+            sql.push_str(
+                r#"
+                ON CONFLICT(block_hash)
+                    DO UPDATE SET
+                        in_longest = excluded.in_longest
+                "#,
+            );
+
+            let mut stmt = tx.prepare(&sql).map_err(Error::PrepareQuery)?;
+
+            // Collect all parameters
+            let mut params = Vec::with_capacity(batch.len() * 5); // 5 fields per record
+            for (header, height, in_longest) in batch {
                 // Encoding header
                 const HEADER_SIZE: usize = 80;
                 let mut raw = vec![0u8; HEADER_SIZE];
                 header
                     .consensus_encode(&mut Cursor::new(&mut raw))
                     .map_err(Error::EncodeHeader)?;
-    
-                // Previous block hash is stored inside the header
+
                 let prev_hash = header.prev_blockhash;
-    
-                // Insert inside the temporary table
-                stmt.execute(named_params! {
-                    ":block_hash": &header.block_hash().as_raw_hash().as_byte_array()[..],
-                    ":height": height,
-                    ":prev_block_hash": &prev_hash.as_raw_hash().as_byte_array()[..],
-                    ":raw": raw,
-                    ":in_longest": if *in_longest { 1 } else { 0 },
-                })
-                .map_err(Error::ExecuteQuery)?;
+
+                // Fill in the same order as (?,?,?,?,?)
+                params.push(Value::Blob(
+                    header.block_hash().as_raw_hash().as_byte_array().to_vec(),
+                ));
+                params.push(Value::Integer(*height as i64));
+                params.push(Value::Blob(
+                    prev_hash.as_raw_hash().as_byte_array().to_vec(),
+                ));
+                params.push(Value::Blob(raw));
+                params.push(Value::Integer(if *in_longest { 1 } else { 0 }));
             }
+
+            // Bulk insert here
+            stmt.execute(params_from_iter(params))
+                .map_err(Error::ExecuteQuery)?;
+            start = end;
         }
 
-        tx.execute_batch(r#"
-            INSERT OR REPLACE INTO headers (block_hash, height, prev_block_hash, raw, in_longest)
-                SELECT block_hash, height, prev_block_hash, raw, in_longest
-                FROM temp_headers
-        "#
-        ).map_err(Error::ExecuteQuery)?;
-    
+        // Finish this mayhem
         tx.commit().map_err(Error::CommitTransaction)?;
         Ok(())
     }

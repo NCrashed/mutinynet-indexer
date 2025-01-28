@@ -77,11 +77,7 @@ impl HeadersCache {
                 .headers
                 .get(block_hash)
                 .ok_or(Error::MissingHeader(*block_hash))?;
-            conn.store_raw_headers(&[(
-                record.header,
-                record.height as i64,
-                record.in_longest,
-            )])?;
+            conn.store_raw_headers(&[(record.header, record.height as i64, record.in_longest)])?;
         }
         conn.set_best_tip(self.best_tip)?;
         self.dirty = vec![];

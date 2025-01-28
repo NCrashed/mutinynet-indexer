@@ -27,6 +27,18 @@ pub fn initialize_db<P: AsRef<Path>>(
     connection
         .pragma_update(None, "temp_store", "MEMORY")
         .map_err(Error::UpdatePragma)?;
+    // WAL mode writes changes to a sequential write-ahead log, and then later synchronizes it back to the main database
+    connection
+        .pragma_update(None, "journal_mode", "WAL")
+        .map_err(Error::UpdatePragma)?;
+    // Give the OS responsibility for the IO to disk
+    connection
+        .pragma_update(None, "synchronous", "normal")
+        .map_err(Error::UpdatePragma)?;
+    // Set higher limit for journal
+    connection
+        .pragma_update(None, "journal_size_limit", "6144000")
+        .map_err(Error::UpdatePragma)?;
 
     trace!("Creation of schema");
     let query = r#"
