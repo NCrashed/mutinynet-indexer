@@ -26,5 +26,7 @@ fn node_sync_headers() {
         indexer.node_status() == NodeStatus::Connected
     });
     // Wait until we have non zero height of downloaded headers
-    wait_until(3, Duration::from_secs(1), || indexer.chain_height() > 0);
+    wait_until(3, Duration::from_secs(1), || {
+        indexer.chain_height().unwrap() > 0
+    });
 }

@@ -4,6 +4,7 @@ use bitcoin::p2p::message::NetworkMessage;
 pub const EVENTS_CAPACITY: usize = 32000;
 
 /// Events that are passed between parts of the system
+#[derive(Debug, Clone)]
 pub enum Event {
     /// Node passes handshake process
     Handshaked,

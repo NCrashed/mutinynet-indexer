@@ -18,7 +18,7 @@ pub fn init_indexer() -> Arc<Indexer> {
     INIT.call_once(|| {
         // Configure logging
         env_logger::builder()
-            .filter(None, LevelFilter::Trace)
+            .filter(None, LevelFilter::Debug)
             .init();
     });
 
@@ -45,7 +45,7 @@ pub fn init_db() -> Connection {
     INIT.call_once(|| {
         // Configure logging
         env_logger::builder()
-            .filter(None, LevelFilter::Trace)
+            .filter(None, LevelFilter::Debug)
             .init();
     });
 

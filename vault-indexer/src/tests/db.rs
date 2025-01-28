@@ -49,9 +49,11 @@ fn db_main_tip() {
     let test_header1 = mk_header(HEADER_HEIGHT_1);
     let test_header2 = mk_header(HEADER_HEIGHT_2);
 
-    cache.update_longest_chain(&[test_header1, test_header2]).unwrap();
+    cache
+        .update_longest_chain(&[test_header1, test_header2])
+        .unwrap();
     cache.store(&db).unwrap();
-    
+
     let tip_hash = db.get_main_tip().unwrap();
     assert_eq!(test_header2.block_hash(), tip_hash);
 }
@@ -69,7 +71,7 @@ fn db_orphans_ordering() {
     cache.update_longest_chain(&[test_header2]).unwrap();
     cache.update_longest_chain(&[test_header1]).unwrap();
     cache.store(&db).unwrap();
-    
+
     let tip_hash = db.get_main_tip().unwrap();
     assert_eq!(test_header2.block_hash(), tip_hash);
 }
@@ -84,11 +86,13 @@ fn db_fork_inactive() {
     let test_header2 = mk_header(HEADER_HEIGHT_2);
 
     let fork_header1 = fake_fork_mine(test_header1);
-    
-    cache.update_longest_chain(&[test_header1, test_header2]).unwrap();
+
+    cache
+        .update_longest_chain(&[test_header1, test_header2])
+        .unwrap();
     cache.update_longest_chain(&[fork_header1]).unwrap();
     cache.store(&db).unwrap();
-    
+
     let tip_hash = db.get_main_tip().unwrap();
     assert_eq!(test_header2.block_hash(), tip_hash);
 }
@@ -106,13 +110,44 @@ fn db_fork_active() {
     let mut fork_header2 = test_header2;
     fork_header2.prev_blockhash = fork_header1.block_hash();
     let fork_header2 = fake_fork_mine(fork_header2);
-    
+
     cache.update_longest_chain(&[test_header1]).unwrap();
-    cache.update_longest_chain(&[fork_header1, fork_header2]).unwrap();
+    cache
+        .update_longest_chain(&[fork_header1, fork_header2])
+        .unwrap();
     cache.store(&db).unwrap();
-    
+
     let tip_hash = db.get_main_tip().unwrap();
     assert_eq!(fork_header2.block_hash(), tip_hash);
+    assert_eq!(cache.get_current_height(), 2);
+}
+
+#[test]
+#[serial]
+fn db_fork_active_longer() {
+    let db = init_db();
+    let mut cache = HeadersCache::load(&db).unwrap();
+
+    let test_header1 = mk_header(HEADER_HEIGHT_1);
+    let test_header2 = mk_header(HEADER_HEIGHT_2);
+
+    let fork_header1 = fake_fork_mine(test_header1);
+    let mut fork_header2 = test_header2;
+    fork_header2.prev_blockhash = fork_header1.block_hash();
+    let fork_header2 = fake_fork_mine(fork_header2);
+    let mut fork_header3 = mk_header(HEADER_HEIGHT_3);
+    fork_header3.prev_blockhash = fork_header2.block_hash();
+    let fork_header3 = fake_fork_mine(fork_header3);
+
+    cache.update_longest_chain(&[test_header1]).unwrap();
+    cache
+        .update_longest_chain(&[fork_header1, fork_header2, fork_header3])
+        .unwrap();
+    cache.store(&db).unwrap();
+
+    let tip_hash = db.get_main_tip().unwrap();
+    assert_eq!(fork_header3.block_hash(), tip_hash);
+    assert_eq!(cache.get_current_height(), 3);
 }
 
 fn fake_fork_mine(mut header: Header) -> Header {
@@ -120,7 +155,11 @@ fn fake_fork_mine(mut header: Header) -> Header {
     loop {
         header.nonce += 1;
         if header.work() >= start_work {
-            println!("Header {}, mined fake nonce : {}", header.block_hash(), header.nonce);
+            println!(
+                "Header {}, mined fake nonce : {}",
+                header.block_hash(),
+                header.nonce
+            );
             break;
         }
     }

@@ -6,8 +6,8 @@ use bitcoin::{
     hashes::Hash,
     BlockHash,
 };
-use sqlite::{Connection, State, Value};
 use core::ops::FnMut;
+use sqlite::{Connection, State, Value};
 use std::io::Cursor;
 
 #[derive(Debug, Clone)]
@@ -23,7 +23,8 @@ pub trait DatabaseHeaders {
 
     /// Iterate all stored headers and call a closure for them
     fn load_block_headers<F>(&self, body: F) -> Result<(), Error>
-        where F: FnMut(HeaderRecord) -> ();
+    where
+        F: FnMut(HeaderRecord) -> ();
 
     /// Stores the header in the database, doesn't mark it as longest chain, but checks that we have the parent in place.
     fn store_block_header(&self, header: Header) -> Result<(), Error> {
@@ -41,7 +42,6 @@ pub trait DatabaseHeaders {
             parent_header.header.block_hash(),
             false,
         )
-        // self.update_longest_chain(header.block_hash())
     }
 
     /// Stores the header without checking that we have the parent in the database
@@ -83,10 +83,10 @@ impl DatabaseHeaders for Connection {
     }
 
     fn load_block_headers<F>(&self, mut body: F) -> Result<(), Error>
-            where F: FnMut(HeaderRecord) -> () 
+    where
+        F: FnMut(HeaderRecord) -> (),
     {
-        let query =
-            "SELECT height, raw, in_longest FROM headers";
+        let query = "SELECT height, raw, in_longest FROM headers";
         let mut statement = self.prepare(query).map_err(Error::PrepareQuery)?;
 
         while let State::Row = statement.next().map_err(Error::QueryNextRow)? {

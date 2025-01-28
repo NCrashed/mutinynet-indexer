@@ -3,7 +3,7 @@ use core::sync::atomic::{self, AtomicBool};
 use core::time::Duration;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
-use std::sync::mpmc::{self, Receiver, Sender};
+use std::sync::mpmc::{self, Sender};
 use std::sync::mpsc::SendError;
 use std::sync::Arc;
 use std::thread::{self, sleep};
@@ -14,6 +14,7 @@ use bitcoin::key::rand::RngCore;
 use bitcoin::p2p::message::{NetworkMessage, RawNetworkMessage};
 use bitcoin::p2p::message_network::VersionMessage;
 use bitcoin::{p2p, secp256k1};
+use bus::BusReader;
 use log::*;
 use thiserror::Error;
 
@@ -24,6 +25,9 @@ use super::event::Event;
 /// How we introduce ourselves to other nodes
 /// TODO: make configurable
 const DEFAULT_USER_AGENT: &str = "Vault indexer 0.1.0";
+
+/// The maximum amount of headers node will return for getheaders message
+pub const MAX_HEADERS_PER_MSG: usize = 2000;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -67,66 +71,67 @@ pub fn node_worker(
     network: Network,
     start_height: u32,
     events_sender: Sender<Event>,
-    events_receiver: Receiver<Event>,
+    events_receiver: BusReader<Event>,
 ) -> Result<(), Error> {
-    loop {
-        match node_process(
-            address,
-            network,
-            start_height,
-            events_sender.clone(),
-            events_receiver.clone(),
-        ) {
-            Err(e @ Error::EventBusSend(_)) => {
-                // We consider that unrecoverable failure of the system
-                error!("{e}");
-                return Err(e);
-            }
-            Err(e @ Error::FailedResolve(_, _)) => {
-                // Not valid address of the node, no need to reconnect
-                error!("{e}");
-                return Err(e);
-            }
-            Err(e @ Error::NoSocketAddress(_)) => {
-                // Perhaphs DNS failure, no need to reconnect
-                error!("{e}");
-                return Err(e);
-            }
-            Err(e @ Error::WrongMagic(_, _)) => {
-                // Misconfigured node or indexer, exiting
-                error!("{e}");
-                return Err(e);
-            }
-            Err(e) => {
-                error!("{e}");
-                events_sender.send(Event::Disconnected)?;
-                warn!("Reconnecting to the node in {RECONNECTION_TIMEOUT} seconds...");
-                sleep(Duration::from_secs(RECONNECTION_TIMEOUT));
-            }
-            Ok(_) => {
-                // Termination procedure
-                return Ok(());
-            }
+    let (res, next_receiver) = node_process(
+        address,
+        network,
+        start_height,
+        events_sender.clone(),
+        events_receiver,
+    );
+    match res {
+        Err(e @ (Error::EventBusSend(_) | Error::EventBusRecv | Error::WrongMagic(_, _))) => {
+            // We consider that reconnection doesn't have sense in these cases
+            error!("{e}");
+            return Err(e);
+        }
+        Err(e) => {
+            error!("{e}");
+            events_sender.send(Event::Disconnected)?;
+            warn!("Reconnecting to the node in {RECONNECTION_TIMEOUT} seconds...");
+            sleep(Duration::from_secs(RECONNECTION_TIMEOUT));
+            node_worker(address, network, start_height, events_sender, next_receiver)
+        }
+        Ok(_) => {
+            // Termination procedure
+            return Ok(());
         }
     }
 }
 
 // Body of worker that connects to the node and processes all messages incoming and outcoming
+//
+// Note that we MUST rescure the events receiver bus. It is not cloneable and we want to be able to
+// restart all connection if something went wrong.
 fn node_process(
     address: &str,
     network: Network,
     start_height: u32,
     events_sender: Sender<Event>,
-    events_receiver: Receiver<Event>,
-) -> Result<(), Error> {
-    let stream: TcpStream = node_handshake(address, network, start_height)?;
-    events_sender.send(Event::Handshaked)?;
+    mut events_receiver: BusReader<Event>,
+) -> (Result<(), Error>, BusReader<Event>) {
+    // Perform handshake sequence
+    let mut stream: TcpStream = match node_handshake(address, network, start_height) {
+        Err(e) => return (Err(e), events_receiver),
+        Ok(stream) => stream,
+    };
+    // Notify top level logic that we are connected
+    match events_sender.send(Event::Handshaked) {
+        Err(e) => return (Err(Error::EventBusSend(e)), events_receiver),
+        Ok(()) => (),
+    }
+    debug!("Handshake event sent");
     let stop_flag = Arc::new(AtomicBool::new(false));
 
-    // One thread read from the socket
-    let mut receiver_stream = stream.try_clone().map_err(Error::SocketCloneFail)?;
+    // Spawn a thread read from the socket
+    let mut receiver_stream = match stream.try_clone().map_err(Error::SocketCloneFail) {
+        Err(e) => return (Err(e), events_receiver),
+        Ok(stream) => stream,
+    };
     let receiver_handle = {
         let stop_flag = stop_flag.clone();
+        let events_sender = events_sender.clone();
         thread::spawn(move || -> Result<(), Error> {
             loop {
                 if stop_flag.load(atomic::Ordering::Relaxed) {
@@ -149,82 +154,45 @@ fn node_process(
         })
     };
 
-    // Second thread is for sending messages to socket
-    let mut sender_stream = stream.try_clone().map_err(Error::SocketCloneFail)?;
-    let sending_handle = {
-        let stop_flag = stop_flag.clone();
-        thread::spawn(move || -> Result<(), Error> {
-            loop {
-                if stop_flag.load(atomic::Ordering::Relaxed) {
-                    break Ok(());
-                }
-
-                match events_receiver.recv_timeout(Duration::from_millis(100)) {
-                    Err(mpmc::RecvTimeoutError::Timeout) => (), // take a chance to check termination
-                    Err(mpmc::RecvTimeoutError::Disconnected) => return Err(Error::EventBusRecv),
-                    Ok(Event::OutcomingMessage(msg)) => {
-                        send_message(&mut sender_stream, network, msg)?;
-                    }
-                    _ => (),
-                }
-            }
-        })
-    };
-
-    // The main thread of the node worker listens for sending messages
+    // Loop that listents for incoming messages and sends them to socket
     loop {
-        // First, check that receiving thread is alive
+        // Check if the receiver thread is dead
         if receiver_handle.is_finished() {
-            stop_flag.store(true, atomic::Ordering::Relaxed);
-            // Shutting down socket will interrupt any reads from the socket to awake other thread
-            stream
-                .shutdown(Shutdown::Both)
-                .map_err(Error::SocketShutdownFail)?;
-            let res1 = receiver_handle.join();
-            let res2 = sending_handle.join(); // wait when second thread exits
-            match res1 {
-                Ok(Ok(())) => (),                       // termination process
-                Ok(Err(e)) => return Err(e),            // error in the receiving thread
-                Err(e) => std::panic::resume_unwind(e), // panic in the receiving thread, non recoverable also
-            }
-            match res2 {
-                Ok(Ok(())) => break,                    // termination process
-                Ok(Err(e)) => return Err(e),            // error in the sending thread
-                Err(e) => std::panic::resume_unwind(e), // panic in the sending thread, non recoverable also
+            match receiver_handle.join() {
+                Err(e) => std::panic::resume_unwind(e), // panic, shutdown everything
+                Ok(Err(e)) => return (Err(e), events_receiver),
+                Ok(_) => return (Ok(()), events_receiver),
             }
         }
 
-        // Next, check that sending thread is alive
-        if sending_handle.is_finished() {
-            stop_flag.store(true, atomic::Ordering::Relaxed);
-            // Shutting down socket will interrupt any reads from the socket to awake other thread
-            stream
-                .shutdown(Shutdown::Both)
-                .map_err(Error::SocketShutdownFail)?;
-            let res1 = sending_handle.join();
-            let res2 = receiver_handle.join(); // wait when second thread exits
-            match res1 {
-                Ok(Ok(())) => (),                       // termination process
-                Ok(Err(e)) => return Err(e),            // error in the sending thread
-                Err(e) => std::panic::resume_unwind(e), // panic in the sending thread, non recoverable also
-            }
-            match res2 {
-                Ok(Ok(())) => break,                    // termination process
-                Ok(Err(e)) => return Err(e),            // error in the receive thread
-                Err(e) => std::panic::resume_unwind(e), // panic in the receive thread, non recoverable also
-            }
-        }
+        // Check events with timeout
+        match events_receiver.recv_timeout(Duration::from_millis(100)) {
+            Err(mpmc::RecvTimeoutError::Timeout) => (), // take a chance to check termination
+            Err(mpmc::RecvTimeoutError::Disconnected) => {
+                // Notify other threads that we are done
+                stop_flag.store(true, atomic::Ordering::Relaxed);
+                // Shutdown socket to force unblocking operations on it, ignore error here if occurs
+                if let Err(e) = stream
+                    .shutdown(Shutdown::Both)
+                    .map_err(Error::SocketShutdownFail)
+                {
+                    error!("At shutdown procedure we got {e}");
+                }
 
-        // Don't do busy loop there
-        sleep(Duration::from_millis(100));
+                return (Err(Error::EventBusRecv), events_receiver);
+            }
+            Ok(Event::OutcomingMessage(msg)) => match send_message(&mut stream, network, msg) {
+                Err(e) => return (Err(e), events_receiver),
+                Ok(()) => (),
+            },
+            _ => (),
+        }
     }
-
-    Ok(())
 }
 
 // Connect to node and do all handshake protocol (version exchange and verack messages)
 fn node_handshake(address: &str, network: Network, start_height: u32) -> Result<TcpStream, Error> {
-    trace!("Resolving address to node {address}...");
+    debug!("Resolving address to node {address}...");
     let mut sock_addrs = address
         .to_socket_addrs()
         .map_err(|e| Error::FailedResolve(address.to_owned(), e))?;
@@ -235,7 +203,7 @@ fn node_handshake(address: &str, network: Network, start_height: u32) -> Result<
     };
 
     // TODO: use connect_timeout and list of nodes
-    trace!("Connecting to the {address} node...");
+    debug!("Connecting to the {address} node...");
     let mut stream =
         TcpStream::connect(address).map_err(|e| Error::Connection(address.to_owned(), e))?;
     info!("Connected to the {address} node");
@@ -248,22 +216,22 @@ fn node_handshake(address: &str, network: Network, start_height: u32) -> Result<
     let first_msg = receive_message(&mut stream, network)?;
     if let NetworkMessage::Version(_) = first_msg {
         // really don't care the correctness of the message
-        trace!("Got version message from peer");
+        debug!("Got version message from peer");
     } else {
         return Err(Error::NoVersionMessage);
     }
     // Send verack message that we accept their version
     send_message(&mut stream, network, NetworkMessage::Verack)?;
-    trace!("Sent verack message");
+    debug!("Sent verack message");
 
     trace!("Awaiting verack from their side");
     let second_msg = receive_message(&mut stream, network)?;
     if let NetworkMessage::Verack = second_msg {
-        trace!("Got verack message from peer");
+        debug!("Got verack message from peer");
     } else {
         return Err(Error::NoVerackMessage);
     }
-    trace!("Handshake finish");
+    debug!("Handshake finish");
     Ok(stream)
 }
 

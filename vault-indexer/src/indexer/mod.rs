@@ -1,22 +1,31 @@
+use bitcoin::{
+    hashes::Hash,
+    p2p::{message::NetworkMessage, message_blockdata::GetHeadersMessage},
+    BlockHash,
+};
+use bus::Bus;
 use core::{
     result::Result,
     sync::atomic::{self, AtomicBool},
     time::Duration,
 };
-
 use event::{Event, EVENTS_CAPACITY};
+use log::*;
 pub use network::Network;
 use sqlite::Connection;
 use std::{
     path::{Path, PathBuf},
-    sync::{mpmc, Arc, Mutex},
+    sync::{mpmc, mpsc::SendError, Arc, Mutex},
 };
 use std::{sync::mpmc::sync_channel, thread};
 use thiserror::Error;
 
-use node::node_worker;
+use node::{node_worker, MAX_HEADERS_PER_MSG};
 
-use crate::{cache::headers::HeadersCache, db::{self, initialize_db}};
+use crate::{
+    cache::headers::HeadersCache,
+    db::{self, initialize_db},
+};
 
 mod event;
 mod network;
@@ -28,12 +37,18 @@ mod node;
 pub enum Error {
     #[error("Failed to read from events bus, disconnected.")]
     EventBusRecv,
+    #[error("Failed to send event to bus: {0}")]
+    EventBusSend(#[from] SendError<Event>),
     #[error("Node worker failure: {0}")]
     Node(#[from] node::Error),
     #[error("Database failure: {0}")]
     Database(#[from] db::Error),
     #[error("Cache error: {0}")]
     Cache(#[from] crate::cache::Error),
+    #[error("Failed to lock on headers cache, poisoned")]
+    HeadersCacheLock,
+    #[error("Failed to lock on database, poisoned")]
+    DatabaseLock,
 }
 
 /// The possible state of connection to bitcoin node we have.
@@ -78,28 +93,45 @@ impl Indexer {
     }
 
     /// Get the height of known main chain of blocks we have sequence of headers for
-    pub fn chain_height(&self) -> u32 {
-        0
+    pub fn chain_height(&self) -> Result<u32, Error> {
+        Ok(self
+            .headers_cache
+            .lock()
+            .map_err(|_| Error::HeadersCacheLock)?
+            .get_current_height())
     }
 
     /// Executes the internal threads (connection to the node, indexing worker) and awaits
     /// of their termination. Intended to be run in separate thread.
     pub fn run(&self) -> Result<(), Error> {
+        // Make events fan-in
         let (events_sender, events_receiver) = sync_channel(EVENTS_CAPACITY);
+        // Make events fan-out
+        let mut events_bus = Bus::new(EVENTS_CAPACITY);
+
+        let node_receiver = events_bus.add_rx();
+        let mut main_receiver = events_bus.add_rx();
+
+        // Connect fain-in and fan-out through dispatcher thread
+        thread::spawn(move || {
+            // Will end as soon as events receiver is dropped
+            for event in events_receiver.iter() {
+                events_bus.broadcast(event);
+            }
+        });
 
         let node_handle = {
             let address = self.node_address.clone();
             let network = self.network;
             let start_height = self.start_height;
             let events_sender = events_sender.clone();
-            let events_receiver = events_receiver.clone();
             thread::spawn(move || -> Result<(), Error> {
                 node_worker(
                     &address,
                     network,
                     start_height,
                     events_sender,
-                    events_receiver,
+                    node_receiver,
                 )?;
                 Ok(())
             })
@@ -116,21 +148,65 @@ impl Indexer {
                 }
             }
 
-            match events_receiver.recv_timeout(Duration::from_millis(100)) {
+            match main_receiver.recv_timeout(Duration::from_millis(100)) {
                 Err(mpmc::RecvTimeoutError::Timeout) => (), // take a chance to check termination
                 Err(mpmc::RecvTimeoutError::Disconnected) => return Err(Error::EventBusRecv),
                 Ok(Event::Handshaked) => {
                     self.node_connected.store(true, atomic::Ordering::Relaxed);
+
+                    // start requesting headers
+                    trace!("Requesting first headers");
+                    let headers_msg = self.make_get_headers()?;
+                    events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
+                        headers_msg,
+                    )))?
                 }
                 Ok(Event::Disconnected) => {
                     self.node_connected.store(false, atomic::Ordering::Relaxed);
                 }
-                Ok(Event::IncomingMessage(msg)) => {}
-                _ => (),
+                Ok(Event::IncomingMessage(msg)) => match msg {
+                    NetworkMessage::Ping(nonce) => {
+                        events_sender.send(Event::OutcomingMessage(NetworkMessage::Pong(nonce)))?
+                    }
+                    NetworkMessage::Headers(headers) => {
+                        debug!("Got {} headers from remote node", headers.len());
+                        {
+                            // Very important to lock first on the cache and next to the connection everywhere or we can deadlock
+                            let mut cache = self
+                                .headers_cache
+                                .lock()
+                                .map_err(|_| Error::HeadersCacheLock)?;
+                            cache.update_longest_chain(&headers)?;
+                            let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+                            cache.store(&conn)?;
+                            info!("New headers height: {}", cache.get_current_height());
+                        }
+
+                        if headers.len() == MAX_HEADERS_PER_MSG {
+                            let headers_msg = self.make_get_headers()?;
+                            events_sender.send(Event::OutcomingMessage(
+                                NetworkMessage::GetHeaders(headers_msg),
+                            ))?
+                        }
+                    }
+                    _ => (),
+                },
+                e => (),
             }
         }
 
         Ok(())
+    }
+
+    fn make_get_headers(&self) -> Result<GetHeadersMessage, Error> {
+        let stop_hash = BlockHash::from_byte_array([0u8; 32]);
+        let locator_hashes = self
+            .headers_cache
+            .lock()
+            .map_err(|_| Error::HeadersCacheLock)?
+            .get_locator_main_chain()?;
+        let headers_msg = GetHeadersMessage::new(locator_hashes, stop_hash);
+        Ok(headers_msg)
     }
 }
 

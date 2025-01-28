@@ -39,8 +39,9 @@ impl HeadersCache {
         let tip_record = self.get_header(self.best_tip)?.clone();
         let empty_hash = BlockHash::from_byte_array([0u8; 32]);
         self.height = tip_record.height;
-        self.main_chain.resize(tip_record.height as usize + 1, empty_hash);
-        
+        self.main_chain
+            .resize(tip_record.height as usize + 1, empty_hash);
+
         let mut current_record = tip_record;
         loop {
             let curr_height = current_record.height;
@@ -48,8 +49,10 @@ impl HeadersCache {
             if current_record.height == 0 {
                 break;
             }
-            current_record = self.get_header(current_record.header.prev_blockhash)?.clone();
-            assert_eq!(curr_height, current_record.height+1);
+            current_record = self
+                .get_header(current_record.header.prev_blockhash)?
+                .clone();
+            assert_eq!(curr_height, current_record.height + 1);
         }
         Ok(())
     }
@@ -100,6 +103,11 @@ impl HeadersCache {
         Ok(hashes)
     }
 
+    /// Get current main chain height
+    pub fn get_current_height(&self) -> u32 {
+        self.height
+    }
+
     /// Checks if the given header chain extends the longest chain and saves metadata.
     ///
     /// If the extended chain is not the longest, traverses back both the longest and current
@@ -113,39 +121,18 @@ impl HeadersCache {
 
         // Check if we updates the tip (the optmistic scenario)
         if self.best_tip == first_header.prev_blockhash {
-            trace!("Extending te current main chain");
+            debug!("Extending the current main chain");
 
-            let tip_record = self
-                .headers
-                .get(&self.best_tip)
-                .ok_or(Error::MissingHeader(self.best_tip))?
-                .clone();
-            // Add to the main chain all headers one by one
-            for (i, header) in headers.iter().enumerate() {
-                let block_hash = header.block_hash();
-                if self.headers.contains_key(&block_hash) {
-                    return Err(Error::AlreadyExisting(block_hash));
-                }
-                self.orphans.remove(&block_hash); // remove from orhpans if some headers arrived too early
-                self.headers.insert(
-                    block_hash,
-                    HeaderRecord {
-                        header: *header,
-                        height: tip_record.height + (i as u32),
-                        in_longest: true,
-                    },
-                );
-                self.dirty.push(block_hash);
-            }
-            // Update the tip
-            self.best_tip = headers.last().unwrap_or(first_header).block_hash();
+            let tip_record = self.get_header(self.best_tip)?;
+            let extension_chain = HeaderChain::from_headers(tip_record.header, &headers[..]);
+            self.store_active(extension_chain)?;
         } else {
-            trace!("Fork detected");
+            debug!("Fork detected");
 
             // Check if we have the header in the cache at all (or we stash them in separate orphans house for a while)
             let new_tip_hash = first_header.prev_blockhash;
             if !self.headers.contains_key(&new_tip_hash) {
-                trace!("The new chain is orphan");
+                debug!("The new chain is orphan");
                 for header in headers {
                     self.orphans.insert(header.block_hash(), *header);
                     return Ok(());
@@ -153,24 +140,24 @@ impl HeadersCache {
             }
 
             // Find the first shared ancestor of the current chain and the new one
-            trace!("Finding the mutual ancestor");
+            debug!("Finding the mutual ancestor");
             let mut new_chain =
                 self.get_chain_until(first_header.prev_blockhash, |r| r.in_longest)?;
-            trace!("Extending the new chain with arrived headers");
+            debug!("Extending the new chain with arrived headers");
             new_chain.extend_tip(&headers)?;
-            trace!("Getting the main chain until has the mutual ancestor");
+            debug!("Getting the main chain until has the mutual ancestor");
             let main_chain = self.get_chain_until(self.best_tip, |r| {
                 r.header.block_hash() == new_chain.root_hash()
             })?;
             if new_chain.total_work() > main_chain.total_work() {
-                trace!("Total work of new chain is greater, inactivating main chain");
+                debug!("Total work of new chain is greater, inactivating main chain");
                 // Reorganization
                 // TODO: inactivate index in vault transactions
                 self.inactivate(&main_chain)?;
-                trace!("Activating new chain");
+                debug!("Activating new chain");
                 self.store_active(new_chain)?;
             } else {
-                trace!("Total work of current active chain is greater, storing fork");
+                debug!("Total work of current active chain is greater, storing fork");
                 // Just store fork
                 self.store_inactive(new_chain)?;
             }
@@ -242,7 +229,7 @@ impl HeadersCache {
         let new_height = start_height + chain.len() as u32 - 1;
         let zero_hash = BlockHash::from_byte_array([0u8; 32]);
         self.main_chain.resize(new_height as usize + 1, zero_hash);
-        
+
         for header in chain.headers() {
             let hash = header.block_hash();
             if self.headers.contains_key(&hash) {
@@ -271,7 +258,7 @@ impl HeadersCache {
             }
         }
 
-        trace!("Make the best tip as: {}", chain.tip_hash());
+        debug!("Make the best tip as: {}", chain.tip_hash());
         self.best_tip = chain.tip_hash();
         self.height = new_height;
 
@@ -348,6 +335,15 @@ impl HeaderChain {
             root,
             trunk_rev: vec![],
             trunk_for: vec![],
+        }
+    }
+
+    /// Create from range of headers
+    pub fn from_headers(root: Header, headers: &[Header]) -> Self {
+        HeaderChain {
+            root: root.clone(),
+            trunk_rev: vec![],
+            trunk_for: headers.to_owned(),
         }
     }
 

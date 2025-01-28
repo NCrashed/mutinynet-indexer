@@ -34,7 +34,7 @@ impl DatabaseMeta for Connection {
 
     fn set_best_tip(&self, tip: BlockHash) -> Result<(), Error> {
         let mut meta = self.load_metada()?;
-        meta.tip_block_hash = tip; 
+        meta.tip_block_hash = tip;
         self.store_metadata(&meta)
     }
 
