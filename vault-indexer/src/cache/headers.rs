@@ -131,7 +131,7 @@ impl HeadersCache {
     /// Construct a message to node to request next blocks from given height
     pub fn make_get_blocks(&self, height: u32, amount: u32) -> Result<NetworkMessage, Error> {
         let mut hashes = vec![];
-        for i in height..(height + amount).min(self.height) {
+        for i in height..(height + amount).min(self.height + 1) {
             let hash = self
                 .get_blockhash_at(i)
                 .ok_or(Error::MissingHeaderHeight(i))?;

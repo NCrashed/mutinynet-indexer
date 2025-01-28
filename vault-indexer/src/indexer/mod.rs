@@ -1,4 +1,4 @@
-use bitcoin::p2p::message::NetworkMessage;
+use bitcoin::p2p::{message::NetworkMessage, message_blockdata::Inventory};
 use bus::Bus;
 use core::{
     result::Result,
@@ -56,9 +56,6 @@ pub enum NodeStatus {
     Disconnected,
     Connected,
 }
-
-/// Seconds between requests for new headers
-const REQUEST_HEADERS_DELAY: u64 = 10;
 
 /// The core object that holds all resources of the indexer server. The main object
 /// the user of the code should interact with.
@@ -145,65 +142,9 @@ impl Indexer {
             })
         };
 
-        // Worker that requests headers periodically
-        // thread::spawn({
-        //     let headers_cache = self.headers_cache.clone();
-        //     let events_sender = events_sender.clone();
-        //     let stop_flag = stop_flag.clone();
-        //     move || -> Result<(), Error> {
-        //         loop {
-        //             if stop_flag.load(atomic::Ordering::Relaxed) {
-        //                 break Ok(());
-        //             }
-        //             trace!("Requesting new headers");
-        //             thread::sleep(Duration::from_secs(REQUEST_HEADERS_DELAY));
-        //             let headers_msg = {
-        //                 let cache = headers_cache.lock().map_err(|_| Error::HeadersCacheLock)?;
-        //                 cache.make_get_headers()?
-        //             };
-        //             events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
-        //                 headers_msg,
-        //             )))?
-        //         }
-        //     }
-        // });
-
-        // Worker that requests blocks for sync
-        thread::spawn({
-            let stop_flag = stop_flag.clone();
-            let database = self.database.clone();
-            let headers_cache = self.headers_cache.clone();
-            let events_sender = events_sender.clone();
-            let batch_size = self.batch_size;
-            let remote_height_ref = self.remote_height.clone();
-            move || -> Result<(), Error> {
-                loop {
-                    if stop_flag.load(atomic::Ordering::Relaxed) {
-                        break Ok(());
-                    }
-
-                    let scanned_height = {
-                        let conn = database.lock().map_err(|_| Error::DatabaseLock)?;
-                        conn.get_scanned_height()?
-                    };
-
-                    {
-                        let cache = headers_cache.lock().map_err(|_| Error::HeadersCacheLock)?;
-                        let current_height = cache.get_current_height();
-                        let remote_height = remote_height_ref.load(atomic::Ordering::Relaxed);
-
-                        if current_height >= remote_height && scanned_height < current_height {
-                            let msg = cache.make_get_blocks(scanned_height, batch_size)?;
-                            events_sender.send(Event::OutcomingMessage(msg))?
-                        }
-                    }
-
-                    // No need to check faster than we can get new headers
-                    thread::sleep(Duration::from_secs(REQUEST_HEADERS_DELAY));
-                }
-            }
-        });
-
+        // Here we track how many blocks we
+        let mut batch_left = 0;
+        let mut max_scanned_height = 0;
         loop {
             // Terminate if node worker ends with unrecoverable error
             if node_handle.is_finished() {
@@ -273,10 +214,87 @@ impl Indexer {
                             events_sender.send(Event::OutcomingMessage(
                                 NetworkMessage::GetHeaders(headers_msg),
                             ))?
+                        } else {
+                            // Request blocks to scan
+                            let cache = self
+                                .headers_cache
+                                .lock()
+                                .map_err(|_| Error::HeadersCacheLock)?;
+                            let height = cache.get_current_height();
+                            let scanned_height = {
+                                let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+                                conn.get_scanned_height()?
+                            };
+
+                            let msg: NetworkMessage =
+                                cache.make_get_blocks(scanned_height, self.batch_size)?;
+                            events_sender.send(Event::OutcomingMessage(msg))?;
+                            // Remember how much blocks we expect
+                            let actual_batch = self.batch_size.min(height - scanned_height + 1);
+                            debug!("Request {} blocks", actual_batch);
+                            batch_left += actual_batch;
                         }
                     }
                     NetworkMessage::Block(block) => {
-                        debug!("Got block: {}", block.header.block_hash());
+                        let hash = block.header.block_hash();
+                        debug!("Got block: {}", hash);
+                        batch_left -= 1;
+
+                        let cache = self
+                            .headers_cache
+                            .lock()
+                            .map_err(|_| Error::HeadersCacheLock)?;
+                        // Remember max height we scanned
+                        max_scanned_height = {
+                            let record = cache.get_header(hash)?;
+                            max_scanned_height.max(record.height)
+                        };
+                        // Scanned all blocks from batch, request next one
+                        trace!("Batch left: {}", batch_left);
+                        if batch_left <= 0 {
+                            // Display progress
+                            let height = cache.get_current_height();
+                            let scanned_part = 100.0 * max_scanned_height as f64 / height as f64;
+                            info!(
+                                "Scanned {}/{} {:.03}%",
+                                max_scanned_height, height, scanned_part
+                            );
+
+                            // Store how much we scanned
+                            let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+                            conn.set_scanned_height(max_scanned_height)?;
+
+                            if max_scanned_height < height {
+                                let msg: NetworkMessage =
+                                    cache.make_get_blocks(max_scanned_height, self.batch_size)?;
+                                events_sender.send(Event::OutcomingMessage(msg))?;
+                                let actual_batch =
+                                    self.batch_size.min(height - max_scanned_height + 1);
+                                debug!("Request {} blocks", actual_batch);
+                                batch_left += actual_batch;
+                            }
+                        }
+                    }
+                    NetworkMessage::Inv(invs) => {
+                        for inv in invs {
+                            match inv {
+                                Inventory::Block(hash) => {
+                                    let cache = self
+                                        .headers_cache
+                                        .lock()
+                                        .map_err(|_| Error::HeadersCacheLock)?;
+
+                                    // Check if we know the header
+                                    if cache.get_header(hash).is_err() {
+                                        let headers_msg = cache.make_get_headers()?;
+                                        events_sender.send(Event::OutcomingMessage(
+                                            NetworkMessage::GetHeaders(headers_msg),
+                                        ))?;
+                                    }
+                                }
+                                _ => (),
+                            }
+                        }
                     }
                     _ => (),
                 },
