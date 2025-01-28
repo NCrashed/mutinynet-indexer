@@ -6,6 +6,8 @@ use thiserror::Error;
 pub enum Error {
     #[error("Failed to open database: {0}")]
     Open(rusqlite::Error),
+    #[error("Update SQlite pragma failure: {0}")]
+    UpdatePragma(rusqlite::Error),
     #[error("Failed to create tables: {0}")]
     CreateSchema(rusqlite::Error),
     #[error("Failed to prepare SQLite query: {0}")]

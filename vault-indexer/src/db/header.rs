@@ -106,35 +106,60 @@ impl DatabaseHeaders for Connection {
     fn store_raw_headers(&mut self, headers: &[(Header, i64, bool)]) -> Result<(), Error> {
         let tx = self.transaction().map_err(Error::StartTransaction)?; // Начинаем транзакцию
 
-        let query = r#"
-            INSERT INTO headers
-                (block_hash, height, prev_block_hash, raw, in_longest)
-            VALUES
-                (:block_hash, :height, :prev_block_hash, :raw, :in_longest)
-            ON CONFLICT(block_hash)
-                DO UPDATE SET
-                    in_longest = excluded.in_longest
-        "#;
+        tx.execute_batch(r#"
+            PRAGMA temp_store = 2; -- Store in internal CPU cache
+            CREATE TEMP TABLE IF NOT EXISTS temp_headers (
+                block_hash BLOB PRIMARY KEY NOT NULL,
+                height INTEGER NOT NULL,
+                prev_block_hash BLOB NOT NULL,
+                raw BLOB NOT NULL,
+                in_longest INTEGER NOT NULL
+            );
+            -- Clean to avoid messing with old values
+            DELETE FROM temp_headers;
+        "#
+        ).map_err(Error::ExecuteQuery)?;
+
         {
-            let mut statement = tx.prepare_cached(query).map_err(Error::PrepareQuery)?;
+            let insert_temp = r#"
+                INSERT INTO temp_headers
+                    (block_hash, height, prev_block_hash, raw, in_longest)
+                VALUES
+                    (:block_hash, :height, :prev_block_hash, :raw, :in_longest)
+            "#;
+    
+            let mut stmt = tx.prepare_cached(insert_temp).map_err(Error::PrepareQuery)?;
+    
             for (header, height, in_longest) in headers {
+                // Encoding header
                 const HEADER_SIZE: usize = 80;
                 let mut raw = vec![0u8; HEADER_SIZE];
                 header
                     .consensus_encode(&mut Cursor::new(&mut raw))
                     .map_err(Error::EncodeHeader)?;
+    
+                // Previous block hash is stored inside the header
                 let prev_hash = header.prev_blockhash;
     
-                statement.execute(named_params! {
+                // Insert inside the temporary table
+                stmt.execute(named_params! {
                     ":block_hash": &header.block_hash().as_raw_hash().as_byte_array()[..],
                     ":height": height,
                     ":prev_block_hash": &prev_hash.as_raw_hash().as_byte_array()[..],
                     ":raw": raw,
                     ":in_longest": if *in_longest { 1 } else { 0 },
-                }).map_err(Error::ExecuteQuery)?;
+                })
+                .map_err(Error::ExecuteQuery)?;
             }
         }
 
+        tx.execute_batch(r#"
+            INSERT OR REPLACE INTO headers (block_hash, height, prev_block_hash, raw, in_longest)
+                SELECT block_hash, height, prev_block_hash, raw, in_longest
+                FROM temp_headers
+        "#
+        ).map_err(Error::ExecuteQuery)?;
+    
         tx.commit().map_err(Error::CommitTransaction)?;
         Ok(())
     }

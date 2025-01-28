@@ -22,6 +22,12 @@ pub fn initialize_db<P: AsRef<Path>>(
         Connection::open(filename).map_err(Error::Open)?
     };
 
+    trace!("Settings pragmas");
+    // Keep temporary tables in memory to speed up copying of big blobs
+    connection
+        .pragma_update(None, "temp_store", "MEMORY")
+        .map_err(Error::UpdatePragma)?;
+
     trace!("Creation of schema");
     let query = r#"
             CREATE TABLE IF NOT EXISTS headers(
@@ -41,7 +47,9 @@ pub fn initialize_db<P: AsRef<Path>>(
                 scanned_height INTEGER NOT NULL
             );
         "#;
-    connection.execute_batch(query).map_err(Error::CreateSchema)?;
+    connection
+        .execute_batch(query)
+        .map_err(Error::CreateSchema)?;
 
     // Store genesis hash to initiate main chain
     let genesis = network.genesis_header();
