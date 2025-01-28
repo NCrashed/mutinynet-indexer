@@ -101,6 +101,11 @@ impl Indexer {
             .get_current_height())
     }
 
+    /// Get the height we already have scanned 
+    pub fn scanned_height(&self) -> Result<u32, Error> {
+        Ok(self.start_height)
+    }
+
     /// Executes the internal threads (connection to the node, indexing worker) and awaits
     /// of their termination. Intended to be run in separate thread.
     pub fn run(&self) -> Result<(), Error> {
