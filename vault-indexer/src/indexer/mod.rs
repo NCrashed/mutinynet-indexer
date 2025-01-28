@@ -1,7 +1,4 @@
-use bitcoin::p2p::{
-    message::NetworkMessage,
-    message_blockdata::{GetBlocksMessage, Inventory},
-};
+use bitcoin::p2p::message::NetworkMessage;
 use bus::Bus;
 use core::{
     result::Result,
@@ -11,7 +8,7 @@ use core::{
 use event::{Event, EVENTS_CAPACITY};
 use log::*;
 pub use network::Network;
-use sqlite::Connection;
+use rusqlite::Connection;
 use std::{
     path::{Path, PathBuf},
     sync::{mpmc, mpsc::SendError, Arc, Mutex},
@@ -149,27 +146,27 @@ impl Indexer {
         };
 
         // Worker that requests headers periodically
-        thread::spawn({
-            let headers_cache = self.headers_cache.clone();
-            let events_sender = events_sender.clone();
-            let stop_flag = stop_flag.clone();
-            move || -> Result<(), Error> {
-                loop {
-                    if stop_flag.load(atomic::Ordering::Relaxed) {
-                        break Ok(());
-                    }
-                    trace!("Requesting new headers");
-                    thread::sleep(Duration::from_secs(REQUEST_HEADERS_DELAY));
-                    let headers_msg = {
-                        let cache = headers_cache.lock().map_err(|_| Error::HeadersCacheLock)?;
-                        cache.make_get_headers()?
-                    };
-                    events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
-                        headers_msg,
-                    )))?
-                }
-            }
-        });
+        // thread::spawn({
+        //     let headers_cache = self.headers_cache.clone();
+        //     let events_sender = events_sender.clone();
+        //     let stop_flag = stop_flag.clone();
+        //     move || -> Result<(), Error> {
+        //         loop {
+        //             if stop_flag.load(atomic::Ordering::Relaxed) {
+        //                 break Ok(());
+        //             }
+        //             trace!("Requesting new headers");
+        //             thread::sleep(Duration::from_secs(REQUEST_HEADERS_DELAY));
+        //             let headers_msg = {
+        //                 let cache = headers_cache.lock().map_err(|_| Error::HeadersCacheLock)?;
+        //                 cache.make_get_headers()?
+        //             };
+        //             events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
+        //                 headers_msg,
+        //             )))?
+        //         }
+        //     }
+        // });
 
         // Worker that requests blocks for sync
         thread::spawn({
@@ -229,7 +226,8 @@ impl Indexer {
                 }
                 Ok(Event::Handshaked(remote_height)) => {
                     self.node_connected.store(true, atomic::Ordering::Relaxed);
-                    self.remote_height.store(remote_height, atomic::Ordering::Relaxed);
+                    self.remote_height
+                        .store(remote_height, atomic::Ordering::Relaxed);
 
                     // start requesting headers
                     trace!("Requesting first headers");
@@ -258,8 +256,8 @@ impl Indexer {
                                 .lock()
                                 .map_err(|_| Error::HeadersCacheLock)?;
                             cache.update_longest_chain(&headers)?;
-                            let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
-                            cache.store(&conn)?;
+                            let mut conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+                            cache.store(&mut conn)?;
                             info!("New headers height: {}", cache.get_current_height());
                         }
 
@@ -271,6 +269,7 @@ impl Indexer {
                                     .map_err(|_| Error::HeadersCacheLock)?;
                                 cache.make_get_headers()?
                             };
+                            debug!("Requesting next headers batch");
                             events_sender.send(Event::OutcomingMessage(
                                 NetworkMessage::GetHeaders(headers_msg),
                             ))?
@@ -336,6 +335,12 @@ impl IndexerBuilder {
     /// Setup how many blocks request per one request
     pub fn batch_size(mut self, size: u32) -> Self {
         self.batch_size_builder = Box::new(move || Ok(size));
+        self
+    }
+
+    /// From which block to start scanning the blockchain
+    pub fn start_height(mut self, height: u32) -> Self {
+        self.start_height_builder = Box::new(move || Ok(height));
         self
     }
 

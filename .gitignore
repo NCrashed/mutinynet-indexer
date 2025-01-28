@@ -1,2 +1,3 @@
 data-bitcoind*/
 target/
+indexer.sqlite*

@@ -183,10 +183,12 @@ fn node_process(
 
                 return (Err(Error::EventBusRecv), events_receiver);
             }
-            Ok(Event::OutcomingMessage(msg)) => match send_message(&mut stream, network, msg) {
+            Ok(Event::OutcomingMessage(msg)) => {
+                debug!("Got message to send");
+                match send_message(&mut stream, network, msg) {
                 Err(e) => return (Err(e), events_receiver),
                 Ok(()) => (),
-            },
+            }},
             Ok(Event::Termination) => {
                 // Notify other threads that we are done
                 stop_flag.store(true, atomic::Ordering::Relaxed);

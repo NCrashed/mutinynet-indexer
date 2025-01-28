@@ -5,19 +5,19 @@ use thiserror::Error;
 #[non_exhaustive]
 pub enum Error {
     #[error("Failed to open database: {0}")]
-    Open(sqlite::Error),
+    Open(rusqlite::Error),
     #[error("Failed to create tables: {0}")]
-    CreateSchema(sqlite::Error),
+    CreateSchema(rusqlite::Error),
     #[error("Failed to prepare SQLite query: {0}")]
-    PrepareQuery(sqlite::Error),
-    #[error("Failed to bind arguments to query: {0}")]
-    BindQuery(sqlite::Error),
-    #[error("Failed to extract next row from query: {0}")]
-    QueryNextRow(sqlite::Error),
-    #[error("Failed to read row field {0}: {1}")]
-    ReadField(String, sqlite::Error),
-    #[error("Cannot decode Bitcoin header: {0}")]
-    DecodeHeader(bitcoin::consensus::encode::Error),
+    PrepareQuery(rusqlite::Error),
+    #[error("Failed execution of query: {0}")]
+    ExecuteQuery(rusqlite::Error),
+    #[error("Failed fetching next row of query: {0}")]
+    FetchRow(rusqlite::Error),
+    #[error("Failed to start transaction: {0}")]
+    StartTransaction(rusqlite::Error),
+    #[error("Failed to commit transaction: {0}")]
+    CommitTransaction(rusqlite::Error),
     #[error("Cannot encode Bitcoin header: {0}")]
     EncodeHeader(bitcoin::io::Error),
     #[error("Missing header for block: {0}")]

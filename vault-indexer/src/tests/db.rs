@@ -28,7 +28,7 @@ fn db_genesis() {
 #[test]
 #[serial]
 fn db_store_header() {
-    let db = init_db();
+    let mut db = init_db();
 
     let test_header = mk_header(HEADER_HEIGHT_1);
 
@@ -43,7 +43,7 @@ fn db_store_header() {
 #[test]
 #[serial]
 fn db_main_tip() {
-    let db = init_db();
+    let mut db = init_db();
     let mut cache = HeadersCache::load(&db).unwrap();
 
     let test_header1 = mk_header(HEADER_HEIGHT_1);
@@ -52,7 +52,7 @@ fn db_main_tip() {
     cache
         .update_longest_chain(&[test_header1, test_header2])
         .unwrap();
-    cache.store(&db).unwrap();
+    cache.store(&mut db).unwrap();
 
     let tip_hash = db.get_main_tip().unwrap();
     assert_eq!(test_header2.block_hash(), tip_hash);
@@ -61,7 +61,7 @@ fn db_main_tip() {
 #[test]
 #[serial]
 fn db_orphans_ordering() {
-    let db = init_db();
+    let mut db = init_db();
     let mut cache = HeadersCache::load(&db).unwrap();
 
     let test_header1 = mk_header(HEADER_HEIGHT_1);
@@ -70,7 +70,7 @@ fn db_orphans_ordering() {
     // Header 2 arrives faster than header 1 (somehow)
     cache.update_longest_chain(&[test_header2]).unwrap();
     cache.update_longest_chain(&[test_header1]).unwrap();
-    cache.store(&db).unwrap();
+    cache.store(&mut db).unwrap();
 
     let tip_hash = db.get_main_tip().unwrap();
     assert_eq!(test_header2.block_hash(), tip_hash);
@@ -79,7 +79,7 @@ fn db_orphans_ordering() {
 #[test]
 #[serial]
 fn db_fork_inactive() {
-    let db = init_db();
+    let mut db = init_db();
     let mut cache = HeadersCache::load(&db).unwrap();
 
     let test_header1 = mk_header(HEADER_HEIGHT_1);
@@ -91,7 +91,7 @@ fn db_fork_inactive() {
         .update_longest_chain(&[test_header1, test_header2])
         .unwrap();
     cache.update_longest_chain(&[fork_header1]).unwrap();
-    cache.store(&db).unwrap();
+    cache.store(&mut db).unwrap();
 
     let tip_hash = db.get_main_tip().unwrap();
     assert_eq!(test_header2.block_hash(), tip_hash);
@@ -100,7 +100,7 @@ fn db_fork_inactive() {
 #[test]
 #[serial]
 fn db_fork_active() {
-    let db = init_db();
+    let mut db = init_db();
     let mut cache = HeadersCache::load(&db).unwrap();
 
     let test_header1 = mk_header(HEADER_HEIGHT_1);
@@ -115,7 +115,7 @@ fn db_fork_active() {
     cache
         .update_longest_chain(&[fork_header1, fork_header2])
         .unwrap();
-    cache.store(&db).unwrap();
+    cache.store(&mut db).unwrap();
 
     let tip_hash = db.get_main_tip().unwrap();
     assert_eq!(fork_header2.block_hash(), tip_hash);
@@ -125,7 +125,7 @@ fn db_fork_active() {
 #[test]
 #[serial]
 fn db_fork_active_longer() {
-    let db = init_db();
+    let mut db = init_db();
     let mut cache = HeadersCache::load(&db).unwrap();
 
     let test_header1 = mk_header(HEADER_HEIGHT_1);
@@ -143,7 +143,7 @@ fn db_fork_active_longer() {
     cache
         .update_longest_chain(&[fork_header1, fork_header2, fork_header3])
         .unwrap();
-    cache.store(&db).unwrap();
+    cache.store(&mut db).unwrap();
 
     let tip_hash = db.get_main_tip().unwrap();
     assert_eq!(fork_header3.block_hash(), tip_hash);

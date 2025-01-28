@@ -4,7 +4,7 @@ use std::sync::Once;
 use std::thread;
 
 use log::LevelFilter;
-use sqlite::Connection;
+use rusqlite::Connection;
 
 use crate::db::initialize_db;
 use crate::{Indexer, Network};

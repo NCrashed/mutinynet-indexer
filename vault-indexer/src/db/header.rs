@@ -1,5 +1,4 @@
 use super::error::Error;
-use super::tools::*;
 use bitcoin::{
     block::Header,
     consensus::{Decodable, Encodable},
@@ -7,7 +6,7 @@ use bitcoin::{
     BlockHash,
 };
 use core::ops::FnMut;
-use sqlite::{Connection, State, Value};
+use rusqlite::{named_params, types::Type, Connection};
 use std::io::Cursor;
 
 #[derive(Debug, Clone)]
@@ -27,7 +26,7 @@ pub trait DatabaseHeaders {
         F: FnMut(HeaderRecord) -> ();
 
     /// Stores the header in the database, doesn't mark it as longest chain, but checks that we have the parent in place.
-    fn store_block_header(&self, header: Header) -> Result<(), Error> {
+    fn store_block_header(&mut self, header: Header) -> Result<(), Error> {
         let parent_header =
             self.load_block_header(header.prev_blockhash)?
                 .ok_or(Error::OrphanBlock(
@@ -35,47 +34,40 @@ pub trait DatabaseHeaders {
                     header.prev_blockhash,
                 ))?;
 
-        self.store_raw_header(
-            header,
-            (parent_header.height + 1) as i64,
-            parent_header.header.block_hash(),
-            false,
-        )
+        self.store_raw_headers(&[(header, (parent_header.height + 1) as i64, false)])
     }
 
     /// Stores the header without checking that we have the parent in the database
-    fn store_raw_header(
-        &self,
-        header: Header,
-        height: i64,
-        prev_hash: BlockHash,
-        in_longest: bool,
-    ) -> Result<(), Error>;
+    fn store_raw_headers(&mut self, headers: &[(Header, i64, bool)]) -> Result<(), Error>;
 }
 
 impl DatabaseHeaders for Connection {
     /// Find stored header record in the database
-    fn load_block_header(&self, block_id: BlockHash) -> Result<Option<HeaderRecord>, Error> {
+    fn load_block_header(&self, block_hash: BlockHash) -> Result<Option<HeaderRecord>, Error> {
         let query =
             "SELECT height, raw, in_longest FROM headers WHERE block_hash = :block_hash LIMIT 1";
-        let mut statement = self.prepare(query).map_err(Error::PrepareQuery)?;
-        statement
-            .bind((":block_hash", &block_id.as_raw_hash().as_byte_array()[..]))
-            .map_err(Error::BindQuery)?;
+        let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
+        let block_hash_bytes = block_hash.as_raw_hash().as_byte_array();
+        let mut result = statement
+            .query_map(named_params! { ":block_hash": block_hash_bytes }, |row| {
+                let height = row.get::<_, i64>(0)?;
+                let raw_header = row.get::<_, Vec<u8>>(1)?;
+                let in_longest = row.get::<_, i64>(2)?;
 
-        if let State::Row = statement.next().map_err(Error::QueryNextRow)? {
-            let height = statement.read_field::<i64>("height")?;
-            let raw_header = statement.read_field::<Vec<u8>>("raw")?;
-            let in_longest = statement.read_field::<i64>("in_longest")?;
+                let mut header_cursor = Cursor::new(raw_header);
+                let header = Header::consensus_decode(&mut header_cursor).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(1, Type::Blob, Box::new(e))
+                })?;
+                Ok(HeaderRecord {
+                    header,
+                    height: height as u32,
+                    in_longest: in_longest != 0,
+                })
+            })
+            .map_err(Error::ExecuteQuery)?;
 
-            let mut header_cursor = Cursor::new(raw_header);
-            let header =
-                Header::consensus_decode(&mut header_cursor).map_err(Error::DecodeHeader)?;
-            Ok(Some(HeaderRecord {
-                header,
-                height: height as u32,
-                in_longest: in_longest != 0,
-            }))
+        if let Some(record) = result.next() {
+            Ok(Some(record.map_err(Error::FetchRow)?))
         } else {
             Ok(None)
         }
@@ -86,59 +78,64 @@ impl DatabaseHeaders for Connection {
         F: FnMut(HeaderRecord) -> (),
     {
         let query = "SELECT height, raw, in_longest FROM headers";
-        let mut statement = self.prepare(query).map_err(Error::PrepareQuery)?;
-
-        while let State::Row = statement.next().map_err(Error::QueryNextRow)? {
-            let height = statement.read_field::<i64>("height")?;
-            let raw_header = statement.read_field::<Vec<u8>>("raw")?;
-            let in_longest = statement.read_field::<i64>("in_longest")?;
+        let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
+        let result = statement.query_map([], |row| {
+            let height = row.get::<_, i64>(0)?;
+            let raw_header = row.get::<_, Vec<u8>>(1)?;
+            let in_longest = row.get::<_, i64>(2)?;
 
             let mut header_cursor = Cursor::new(raw_header);
             let header =
-                Header::consensus_decode(&mut header_cursor).map_err(Error::DecodeHeader)?;
+                Header::consensus_decode(&mut header_cursor).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(1, Type::Blob, Box::new(e))
+                })?;
             let record = HeaderRecord {
                 header,
                 height: height as u32,
                 in_longest: in_longest != 0,
             };
-            body(record)
+            Ok(record)
+        }).map_err(Error::ExecuteQuery)?;
+
+        for record in result {
+            body(record.map_err(Error::FetchRow)?)
         }
         Ok(())
     }
 
-    fn store_raw_header(
-        &self,
-        header: Header,
-        height: i64,
-        prev_hash: BlockHash,
-        in_longest: bool,
-    ) -> Result<(), Error> {
-        let query =
-            "INSERT INTO headers VALUES(:block_hash, :height, :prev_block_hash, :raw, :in_longest)
-                ON CONFLICT(block_hash) DO UPDATE SET in_longest=excluded.in_longest";
+    fn store_raw_headers(&mut self, headers: &[(Header, i64, bool)]) -> Result<(), Error> {
+        let tx = self.transaction().map_err(Error::StartTransaction)?; // Начинаем транзакцию
 
-        const HEADER_SIZE: usize = 80;
-        let mut raw = vec![0u8; HEADER_SIZE];
-        header
-            .consensus_encode(&mut Cursor::new(&mut raw))
-            .map_err(Error::EncodeHeader)?;
+        let query = r#"
+            INSERT INTO headers
+                (block_hash, height, prev_block_hash, raw, in_longest)
+            VALUES
+                (:block_hash, :height, :prev_block_hash, :raw, :in_longest)
+            ON CONFLICT(block_hash)
+                DO UPDATE SET
+                    in_longest = excluded.in_longest
+        "#;
+        {
+            let mut statement = tx.prepare_cached(query).map_err(Error::PrepareQuery)?;
+            for (header, height, in_longest) in headers {
+                const HEADER_SIZE: usize = 80;
+                let mut raw = vec![0u8; HEADER_SIZE];
+                header
+                    .consensus_encode(&mut Cursor::new(&mut raw))
+                    .map_err(Error::EncodeHeader)?;
+                let prev_hash = header.prev_blockhash;
+    
+                statement.execute(named_params! {
+                    ":block_hash": &header.block_hash().as_raw_hash().as_byte_array()[..],
+                    ":height": height,
+                    ":prev_block_hash": &prev_hash.as_raw_hash().as_byte_array()[..],
+                    ":raw": raw,
+                    ":in_longest": if *in_longest { 1 } else { 0 },
+                }).map_err(Error::ExecuteQuery)?;
+            }
+        }
 
-        self.single_execute::<_, (_, Value)>(
-            "insert header",
-            query,
-            [
-                (
-                    ":block_hash",
-                    header.block_hash().as_raw_hash().as_byte_array()[..].into(),
-                ),
-                (":height", height.into()),
-                (
-                    ":prev_block_hash",
-                    prev_hash.as_raw_hash().as_byte_array()[..].into(),
-                ),
-                (":raw", raw.into()),
-                (":in_longest", (if in_longest { 1 } else { 0 }).into()),
-            ],
-        )
+        tx.commit().map_err(Error::CommitTransaction)?;
+        Ok(())
     }
 }

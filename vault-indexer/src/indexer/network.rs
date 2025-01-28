@@ -1,4 +1,5 @@
 use std::io::Cursor;
+use clap::ValueEnum;
 
 use bitcoin::{block::Header, consensus::Decodable, constants::genesis_block, p2p::Magic};
 
@@ -12,15 +13,13 @@ const MUTINY_SIGNET_GENESIS_HEADER: [u8; 80] = [
 ];
 
 /// Extended network enum that includes also the Mutiny signet
-#[derive(Copy, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
+#[derive(Copy, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug, ValueEnum)]
 pub enum Network {
     /// Mainnet Bitcoin.
     Bitcoin,
-    /// Bitcoin's testnet network. (In future versions this will be combined
-    /// into a single variant containing the version)
+    /// Bitcoin's testnet network.
     Testnet,
-    /// Bitcoin's testnet4 network. (In future versions this will be combined
-    /// into a single variant containing the version)
+    /// Bitcoin's testnet4 network.
     Testnet4,
     /// Bitcoin's signet network.
     Signet,
@@ -28,6 +27,19 @@ pub enum Network {
     Mutinynet,
     /// Bitcoin's regtest network.
     Regtest,
+}
+
+impl ToString for Network {
+    fn to_string(&self) -> String {
+        match self {
+            Network::Bitcoin => "bitcoin".to_owned(),
+            Network::Testnet => "testnet".to_owned(),
+            Network::Testnet4 => "testnet4".to_owned(),
+            Network::Signet => "signet".to_owned(),
+            Network::Mutinynet => "mutinynet".to_owned(),
+            Network::Regtest => "regtest".to_owned(),
+        }
+    }
 }
 
 impl Network {

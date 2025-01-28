@@ -5,13 +5,13 @@ use bitcoin::{
     hashes::Hash,
     p2p::{
         message::NetworkMessage,
-        message_blockdata::{GetBlocksMessage, GetHeadersMessage, Inventory},
+        message_blockdata::{GetHeadersMessage, Inventory},
     },
     BlockHash, Work,
 };
 use core::{fmt::Display, iter::Iterator};
 use log::*;
-use sqlite::Connection;
+use rusqlite::Connection;
 use std::collections::HashMap;
 
 pub struct HeadersCache {
@@ -39,11 +39,13 @@ impl HeadersCache {
             dirty: vec![],
             orphans: HashMap::new(),
         };
+        trace!("Loading main chain");
         cache.fill_main_chain()?;
         Ok(cache)
     }
 
     fn fill_main_chain(&mut self) -> Result<(), Error> {
+        trace!("Loading the head: {}", self.best_tip);
         let tip_record = self.get_header(self.best_tip)?.clone();
         let empty_hash = BlockHash::from_byte_array([0u8; 32]);
         self.height = tip_record.height;
@@ -57,6 +59,8 @@ impl HeadersCache {
             if current_record.height == 0 {
                 break;
             }
+            // let prev_hash = current_record.header.prev_blockhash;
+            // trace!("Loading previous block: {}", prev_hash);
             current_record = self
                 .get_header(current_record.header.prev_blockhash)?
                 .clone();
@@ -66,20 +70,20 @@ impl HeadersCache {
     }
 
     /// Dump all dirty parts of cache to the database
-    pub fn store(&mut self, conn: &Connection) -> Result<(), Error> {
-        conn.set_best_tip(self.best_tip)?;
+    pub fn store(&mut self, conn: &mut Connection) -> Result<(), Error> {
         for block_hash in self.dirty.iter() {
+            // trace!("Saving block: {}", block_hash);
             let record = self
                 .headers
                 .get(block_hash)
                 .ok_or(Error::MissingHeader(*block_hash))?;
-            conn.store_raw_header(
+            conn.store_raw_headers(&[(
                 record.header,
                 record.height as i64,
-                record.header.prev_blockhash,
                 record.in_longest,
-            )?;
+            )])?;
         }
+        conn.set_best_tip(self.best_tip)?;
         self.dirty = vec![];
         Ok(())
     }

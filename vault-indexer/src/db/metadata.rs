@@ -1,8 +1,7 @@
 use super::error::Error;
-use super::tools::*;
 use bitcoin::{hashes::Hash, BlockHash};
 use core::convert::TryInto;
-use sqlite::{Connection, State, Value};
+use rusqlite::{named_params, types::Type, Connection};
 
 #[derive(Debug, Clone)]
 pub struct DbMetadata {
@@ -58,48 +57,57 @@ impl DatabaseMeta for Connection {
 
     fn has_metadata(&self) -> Result<bool, Error> {
         let query = "SELECT count(id) as count FROM metadata";
-        let mut statement = self.prepare(query).map_err(Error::PrepareQuery)?;
+        let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
 
-        if let State::Row = statement.next().map_err(Error::QueryNextRow)? {
-            let count = statement.read_field::<i64>("count")?;
+        let mut result = statement.query_map([], |row| {
+            let count = row.get::<_, i64>(0)?;
             Ok(count != 0)
+        }).map_err(Error::ExecuteQuery)?;
+
+        if let Some(row) = result.next() {
+            Ok(row.map_err(Error::FetchRow)?)
         } else {
             Ok(false)
         }
     }
 
     fn store_metadata(&self, meta: &DbMetadata) -> Result<(), Error> {
-        let query = "INSERT INTO metadata VALUES(0, :tip_block_hash, :scanned_height)
-                    ON CONFLICT(id) DO UPDATE SET tip_block_hash=excluded.tip_block_hash, scanned_height=excluded.scanned_height";
-        self.single_execute::<_, (_, Value)>(
-            "upsert metadata",
-            query,
-            [
-                (
-                    ":tip_block_hash",
-                    meta.tip_block_hash.as_raw_hash().as_byte_array()[..].into(),
-                ),
-                (":scanned_height", (meta.scanned_height as i64).into()),
-            ],
-        )
+        let query = r#"
+            INSERT INTO metadata VALUES(0, :tip_block_hash, :scanned_height)
+                    ON CONFLICT(id) DO UPDATE SET 
+                        tip_block_hash=excluded.tip_block_hash, 
+                        scanned_height=excluded.scanned_height
+            "#;
+        let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
+        statement.execute(named_params! {
+            ":tip_block_hash": &meta.tip_block_hash.as_raw_hash().as_byte_array()[..],
+            ":scanned_height": meta.scanned_height as i64,
+        }).map_err(Error::ExecuteQuery)?;
+        Ok(())
     }
 
     fn load_metada(&self) -> Result<DbMetadata, Error> {
         let query = "SELECT * FROM metadata LIMIT 1";
-        let mut statement = self.prepare(query).map_err(Error::PrepareQuery)?;
+        let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
 
-        if let State::Row = statement.next().map_err(Error::QueryNextRow)? {
-            let tip_block_hash_bytes = statement.read_field::<Vec<u8>>("tip_block_hash")?;
+        let mut rows = statement.query_map([], |row| {
+            let tip_block_hash_bytes = row.get::<_, Vec<u8>>(1)?;
             let tip_block_hash_sized = tip_block_hash_bytes
                 .clone()
                 .try_into()
-                .map_err(|_| Error::TipBlockHashWrongSize(tip_block_hash_bytes))?;
-            let scanned_height = statement.read_field::<i64>("scanned_height")?;
+                .map_err(|_| 
+                    rusqlite::Error::FromSqlConversionFailure(1, Type::Blob, Box::new(Error::TipBlockHashWrongSize(tip_block_hash_bytes)))
+                    )?;
+            let scanned_height = row.get::<_, i64>(2)?;
             let tip_block_hash = BlockHash::from_byte_array(tip_block_hash_sized);
             Ok(DbMetadata {
                 tip_block_hash,
                 scanned_height: scanned_height as u32,
             })
+        }).map_err(Error::ExecuteQuery)?;
+
+        if let Some(row) = rows.next() {
+            Ok(row.map_err(Error::FetchRow)?)
         } else {
             Err(Error::NoMetadata)
         }
