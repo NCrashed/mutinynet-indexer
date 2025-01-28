@@ -1,6 +1,14 @@
 use super::error::Error;
 use crate::db::{DatabaseHeaders, DatabaseMeta, HeaderRecord};
-use bitcoin::{block::Header, hashes::Hash, p2p::message_blockdata::GetHeadersMessage, BlockHash, Work};
+use bitcoin::{
+    block::Header,
+    hashes::Hash,
+    p2p::{
+        message::NetworkMessage,
+        message_blockdata::{GetBlocksMessage, GetHeadersMessage, Inventory},
+    },
+    BlockHash, Work,
+};
 use core::{fmt::Display, iter::Iterator};
 use log::*;
 use sqlite::Connection;
@@ -92,8 +100,17 @@ impl HeadersCache {
     /// and helps to identify which chain extension we want to ask from
     /// remote peer.
     pub fn get_locator_main_chain(&self) -> Result<Vec<BlockHash>, Error> {
+        self.get_height_locator(self.height)
+    }
+
+    /// Get the Bitcoin core locator of current main chain pointing to the given height
+    ///
+    /// The locator is list of hashes that is sampled across the chain
+    /// and helps to identify which chain extension we want to ask from
+    /// remote peer.
+    pub fn get_height_locator(&self, height: u32) -> Result<Vec<BlockHash>, Error> {
         let mut hashes = vec![];
-        let heights = get_locator_heights(self.height);
+        let heights = get_locator_heights(height);
         for i in heights {
             let hash = self
                 .get_blockhash_at(i)
@@ -102,14 +119,25 @@ impl HeadersCache {
         }
         Ok(hashes)
     }
-    
+
     /// Construct a message to node to request next headers from head
     pub fn make_get_headers(&self) -> Result<GetHeadersMessage, Error> {
         let stop_hash = BlockHash::from_byte_array([0u8; 32]);
-        let locator_hashes = self
-            .get_locator_main_chain()?;
+        let locator_hashes = self.get_locator_main_chain()?;
         let headers_msg = GetHeadersMessage::new(locator_hashes, stop_hash);
         Ok(headers_msg)
+    }
+
+    /// Construct a message to node to request next blocks from given height
+    pub fn make_get_blocks(&self, height: u32, amount: u32) -> Result<NetworkMessage, Error> {
+        let mut hashes = vec![];
+        for i in height..(height + amount).min(self.height) {
+            let hash = self
+                .get_blockhash_at(i)
+                .ok_or(Error::MissingHeaderHeight(i))?;
+            hashes.push(Inventory::Block(hash));
+        }
+        Ok(NetworkMessage::GetData(hashes))
     }
 
     /// Get current main chain height

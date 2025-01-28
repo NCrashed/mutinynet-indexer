@@ -60,6 +60,8 @@ pub enum Error {
     NoVersionMessage,
     #[error("Second message from the peer is not version ack")]
     NoVerackMessage,
+    #[error("Connected to self, identical nonce in version messages")]
+    SelfConnection,
 }
 
 /// Reconnection delay in seconds
@@ -112,12 +114,12 @@ fn node_process(
     mut events_receiver: BusReader<Event>,
 ) -> (Result<(), Error>, BusReader<Event>) {
     // Perform handshake sequence
-    let mut stream: TcpStream = match node_handshake(address, network, start_height) {
+    let (mut stream, remote_height) = match node_handshake(address, network, start_height) {
         Err(e) => return (Err(e), events_receiver),
         Ok(stream) => stream,
     };
     // Notify top level logic that we are connected
-    match events_sender.send(Event::Handshaked) {
+    match events_sender.send(Event::Handshaked(remote_height)) {
         Err(e) => return (Err(Error::EventBusSend(e)), events_receiver),
         Ok(()) => (),
     }
@@ -204,7 +206,7 @@ fn node_process(
 }
 
 // Connect to node and do all handshake protocol (version exchange and verack messages)
-fn node_handshake(address: &str, network: Network, start_height: u32) -> Result<TcpStream, Error> {
+fn node_handshake(address: &str, network: Network, start_height: u32) -> Result<(TcpStream, u32), Error> {
     debug!("Resolving address to node {address}...");
     let mut sock_addrs = address
         .to_socket_addrs()
@@ -223,16 +225,22 @@ fn node_handshake(address: &str, network: Network, start_height: u32) -> Result<
 
     trace!("Handshaking");
     let ver_msg = build_version_message(&node_addr, DEFAULT_USER_AGENT, start_height);
-    send_message(&mut stream, network, ver_msg)?;
+    let self_nonce = ver_msg.nonce;
+    send_message(&mut stream, network, NetworkMessage::Version(ver_msg))?;
     trace!("Sent version message, awaiting version msg from peer...");
 
     let first_msg = receive_message(&mut stream, network)?;
-    if let NetworkMessage::Version(_) = first_msg {
+    let remote_height = if let NetworkMessage::Version(ver) = first_msg {
         // really don't care the correctness of the message
         debug!("Got version message from peer");
+        if ver.nonce == self_nonce {
+            return Err(Error::SelfConnection);
+        }
+        ver.start_height
     } else {
         return Err(Error::NoVersionMessage);
-    }
+    };
+
     // Send verack message that we accept their version
     send_message(&mut stream, network, NetworkMessage::Verack)?;
     debug!("Sent verack message");
@@ -245,7 +253,7 @@ fn node_handshake(address: &str, network: Network, start_height: u32) -> Result<
         return Err(Error::NoVerackMessage);
     }
     debug!("Handshake finish");
-    Ok(stream)
+    Ok((stream, remote_height as u32))
 }
 
 fn send_message(
@@ -302,7 +310,7 @@ fn build_version_message(
     address: &SocketAddr,
     user_agent: &str,
     start_height: u32,
-) -> NetworkMessage {
+) -> VersionMessage {
     // "bitfield of features to be enabled for this connection"
     let services = p2p::ServiceFlags::NONE;
 
@@ -325,7 +333,7 @@ fn build_version_message(
     let nonce: u64 = secp256k1::rand::thread_rng().next_u64();
 
     // Construct the message
-    let msg = VersionMessage::new(
+    VersionMessage::new(
         services,
         timestamp as i64,
         addr_recv,
@@ -333,6 +341,5 @@ fn build_version_message(
         nonce,
         user_agent.to_owned(),
         start_height as i32,
-    );
-    NetworkMessage::Version(msg)
+    )
 }

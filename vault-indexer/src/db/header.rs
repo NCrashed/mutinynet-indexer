@@ -28,7 +28,6 @@ pub trait DatabaseHeaders {
 
     /// Stores the header in the database, doesn't mark it as longest chain, but checks that we have the parent in place.
     fn store_block_header(&self, header: Header) -> Result<(), Error> {
-        // TODO: process orphan headers (perhaps in separate table)
         let parent_header =
             self.load_block_header(header.prev_blockhash)?
                 .ok_or(Error::OrphanBlock(

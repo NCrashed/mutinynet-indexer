@@ -1,8 +1,11 @@
-use bitcoin::p2p::message::NetworkMessage;
+use bitcoin::p2p::{
+    message::NetworkMessage,
+    message_blockdata::{GetBlocksMessage, Inventory},
+};
 use bus::Bus;
 use core::{
     result::Result,
-    sync::atomic::{self, AtomicBool},
+    sync::atomic::{self, AtomicBool, AtomicU32},
     time::Duration,
 };
 use event::{Event, EVENTS_CAPACITY};
@@ -20,7 +23,7 @@ use node::{node_worker, MAX_HEADERS_PER_MSG};
 
 use crate::{
     cache::headers::HeadersCache,
-    db::{self, initialize_db},
+    db::{self, initialize_db, metadata::DatabaseMeta},
 };
 
 mod event;
@@ -66,9 +69,11 @@ pub struct Indexer {
     network: Network,
     node_address: String,
     start_height: u32,
-    node_connected: AtomicBool,
+    node_connected: Arc<AtomicBool>,
     database: Arc<Mutex<Connection>>,
     headers_cache: Arc<Mutex<HeadersCache>>,
+    batch_size: u32,
+    remote_height: Arc<AtomicU32>,
 }
 
 impl Indexer {
@@ -115,7 +120,7 @@ impl Indexer {
         // Register all readers of events in advance
         let node_receiver = events_bus.add_rx();
         let mut main_receiver = events_bus.add_rx();
-        // Make a flag to terminate threads after the main runner exits 
+        // Make a flag to terminate threads after the main runner exits
         let stop_flag = Arc::new(AtomicBool::new(false));
 
         // Connect fain-in and fan-out through dispatcher thread
@@ -166,16 +171,38 @@ impl Indexer {
             }
         });
 
-        // Worker that syncs blocks
+        // Worker that requests blocks for sync
         thread::spawn({
             let stop_flag = stop_flag.clone();
+            let database = self.database.clone();
+            let headers_cache = self.headers_cache.clone();
+            let events_sender = events_sender.clone();
+            let batch_size = self.batch_size;
+            let remote_height_ref = self.remote_height.clone();
             move || -> Result<(), Error> {
                 loop {
                     if stop_flag.load(atomic::Ordering::Relaxed) {
                         break Ok(());
                     }
 
-                    
+                    let scanned_height = {
+                        let conn = database.lock().map_err(|_| Error::DatabaseLock)?;
+                        conn.get_scanned_height()?
+                    };
+
+                    {
+                        let cache = headers_cache.lock().map_err(|_| Error::HeadersCacheLock)?;
+                        let current_height = cache.get_current_height();
+                        let remote_height = remote_height_ref.load(atomic::Ordering::Relaxed);
+
+                        if current_height >= remote_height && scanned_height < current_height {
+                            let msg = cache.make_get_blocks(scanned_height, batch_size)?;
+                            events_sender.send(Event::OutcomingMessage(msg))?
+                        }
+                    }
+
+                    // No need to check faster than we can get new headers
+                    thread::sleep(Duration::from_secs(REQUEST_HEADERS_DELAY));
                 }
             }
         });
@@ -200,8 +227,9 @@ impl Indexer {
                     events_sender.send(Event::Termination)?;
                     return Err(Error::EventBusRecv);
                 }
-                Ok(Event::Handshaked) => {
+                Ok(Event::Handshaked(remote_height)) => {
                     self.node_connected.store(true, atomic::Ordering::Relaxed);
+                    self.remote_height.store(remote_height, atomic::Ordering::Relaxed);
 
                     // start requesting headers
                     trace!("Requesting first headers");
@@ -248,6 +276,9 @@ impl Indexer {
                             ))?
                         }
                     }
+                    NetworkMessage::Block(block) => {
+                        debug!("Got block: {}", block.header.block_hash());
+                    }
                     _ => (),
                 },
                 _ => (),
@@ -270,6 +301,7 @@ pub struct IndexerBuilder {
     node_builder: LazyBuilder<String>,
     start_height_builder: LazyBuilder<u32>,
     db_path_builder: LazyBuilder<PathBuf>,
+    batch_size_builder: LazyBuilder<u32>,
 }
 
 impl IndexerBuilder {
@@ -279,6 +311,7 @@ impl IndexerBuilder {
             node_builder: Box::new(|| Ok("45.79.52.207:38333".to_owned())),
             start_height_builder: Box::new(|| Ok(0)),
             db_path_builder: Box::new(|| Ok(":memory:".into())),
+            batch_size_builder: Box::new(|| Ok(500)),
         }
     }
 
@@ -300,6 +333,12 @@ impl IndexerBuilder {
         self
     }
 
+    /// Setup how many blocks request per one request
+    pub fn batch_size(mut self, size: u32) -> Self {
+        self.batch_size_builder = Box::new(move || Ok(size));
+        self
+    }
+
     pub fn build(self) -> Result<Indexer, Error> {
         let start_height = (self.start_height_builder)()?;
         let db_path = (self.db_path_builder)()?;
@@ -310,9 +349,11 @@ impl IndexerBuilder {
             network,
             node_address: (self.node_builder)()?,
             start_height,
-            node_connected: AtomicBool::new(false),
+            node_connected: Arc::new(AtomicBool::new(false)),
             database: Arc::new(Mutex::new(database)),
             headers_cache: Arc::new(Mutex::new(headers_cache)),
+            batch_size: (self.batch_size_builder)()?,
+            remote_height: Arc::new(AtomicU32::new(0)),
         })
     }
 }
