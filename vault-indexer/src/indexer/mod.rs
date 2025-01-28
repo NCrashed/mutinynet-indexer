@@ -166,6 +166,20 @@ impl Indexer {
             }
         });
 
+        // Worker that syncs blocks
+        thread::spawn({
+            let stop_flag = stop_flag.clone();
+            move || -> Result<(), Error> {
+                loop {
+                    if stop_flag.load(atomic::Ordering::Relaxed) {
+                        break Ok(());
+                    }
+
+                    
+                }
+            }
+        });
+
         loop {
             // Terminate if node worker ends with unrecoverable error
             if node_handle.is_finished() {
@@ -287,14 +301,15 @@ impl IndexerBuilder {
     }
 
     pub fn build(self) -> Result<Indexer, Error> {
+        let start_height = (self.start_height_builder)()?;
         let db_path = (self.db_path_builder)()?;
         let network = (self.network_builder)()?;
-        let database = initialize_db(&db_path, network)?;
+        let database = initialize_db(&db_path, network, start_height)?;
         let headers_cache = HeadersCache::load(&database)?;
         Ok(Indexer {
             network,
             node_address: (self.node_builder)()?,
-            start_height: (self.start_height_builder)()?,
+            start_height,
             node_connected: AtomicBool::new(false),
             database: Arc::new(Mutex::new(database)),
             headers_cache: Arc::new(Mutex::new(headers_cache)),

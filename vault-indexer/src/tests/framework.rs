@@ -49,7 +49,7 @@ pub fn init_db() -> Connection {
             .init();
     });
 
-    initialize_db(":memory:", Network::Mutinynet).expect("Database created")
+    initialize_db(":memory:", Network::Mutinynet, 0).expect("Database created")
 }
 
 /// Helper that polls the function for `count` times and waits for `delay` between calls.

@@ -12,7 +12,7 @@ pub use metadata::*;
 use sqlite::Connection;
 use std::path::Path;
 
-pub fn initialize_db<P: AsRef<Path>>(filename: P, network: Network) -> Result<Connection, Error> {
+pub fn initialize_db<P: AsRef<Path>>(filename: P, network: Network, start_height: u32) -> Result<Connection, Error> {
     trace!("Opening database {:?}", filename.as_ref());
     let connection = sqlite::open(filename).map_err(Error::Open)?;
 
@@ -33,7 +33,8 @@ pub fn initialize_db<P: AsRef<Path>>(filename: P, network: Network) -> Result<Co
 
         CREATE TABLE IF NOT EXISTS metadata (
             id INTEGER PRIMARY KEY CHECK (id = 0), -- The table has only one row
-            tip_block_hash BLOB NOT NULL
+            tip_block_hash BLOB NOT NULL,
+            scanned_height INTEGER NOT NULL
         );
     ",
         )
@@ -53,6 +54,7 @@ pub fn initialize_db<P: AsRef<Path>>(filename: P, network: Network) -> Result<Co
     if !connection.has_metadata()? {
         connection.store_metadata(&DbMetadata {
             tip_block_hash: genesis.block_hash(),
+            scanned_height: start_height,
         })?;
     }
 
