@@ -43,9 +43,9 @@ pub fn initialize_db<P: AsRef<Path>>(
     trace!("Creation of schema");
     let query = r#"
             CREATE TABLE IF NOT EXISTS headers(
-                block_hash          BLOB NOT NULL PRIMARY KEY,
+                block_hash          BLOB(32) NOT NULL PRIMARY KEY,
                 height              INTEGER NOT NULL,
-                prev_block_hash     BLOB NOT NULL,
+                prev_block_hash     BLOB(32) NOT NULL,
                 raw                 BLOB NOT NULL,
                 in_longest          INTEGER NOT NULL
             );
@@ -56,9 +56,51 @@ pub fn initialize_db<P: AsRef<Path>>(
             CREATE TABLE IF NOT EXISTS metadata(
                 id INTEGER PRIMARY KEY CHECK (id = 0), -- The table has only one row
                 network TEXT NOT NULL,
-                tip_block_hash BLOB NOT NULL,
+                tip_block_hash BLOB(32) NOT NULL,
                 scanned_height INTEGER NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS vaults(
+                open_txid           BLOB(32) NOT NULL,
+                output              INTEGER NOT NULL,
+                balance             INTEGER NOT NULL,
+                oracle_price        INTEGER NOT NULL,
+                oracle_timestamp    INTEGER NOT NULL,
+                liquidation_price   INTEGER,
+                liquidation_hash    BLOB(32),
+                PRIMARY KEY (open_txid, output) -- Actually I don't sure if two vault can be created within one tx
+            );
+
+            CREATE TABLE IF NOT EXISTS transactions(
+                txid                BLOB(32) NOT NULL,
+                output              INTEGER NOT NULL,
+                vault_txid          BLOB(32) NOT NULL,
+                vault_output        INTEGER NOT NULL,
+                -- Fields extracted from transaction
+                version             TEXT NOT NULL,
+                action              TEXT NOT NULL,
+                balance             INTEGER NOT NULL,
+                oracle_price        INTEGER NOT NULL,
+                oracle_timestamp    INTEGER NOT NULL,
+                liquidation_price   INTEGER,
+                liquidation_hash    BLOB(32),
+                -- Metainfo 
+                block_hash          BLOB(32) NOT NULL,
+                height              INTEGER NOT NULL,
+                in_longest          INTEGER NOT NULL,
+                raw_tx              BLOB NOT NULL,
+
+                PRIMARY KEY (txid, output),
+                FOREIGN KEY (vault_txid, vault_output) REFERENCES vaults(open_txid, output),
+                FOREIGN KEY (block_hash) REFERENCES headers(block_hash)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_transactions_vault_id ON transactions(vault_txid, vault_output);
+            CREATE INDEX IF NOT EXISTS idx_transactions_action ON transactions(action);
+            CREATE INDEX IF NOT EXISTS idx_transactions_height ON transactions(height);
+            CREATE INDEX IF NOT EXISTS idx_transactions_height_in_longest ON transactions(height, in_longest);
+            CREATE INDEX IF NOT EXISTS idx_transactions_block_hash ON transactions(block_hash);
+            CREATE INDEX IF NOT EXISTS idx_transactions_in_longest ON transactions(in_longest);
         "#;
     connection
         .execute_batch(query)
