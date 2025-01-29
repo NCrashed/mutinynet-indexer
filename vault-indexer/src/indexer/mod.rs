@@ -247,7 +247,12 @@ impl Indexer {
             let mut conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
             cache.store(&mut conn)?;
             let current_height = cache.get_current_height();
-            let remote_height = self.remote_height.load(atomic::Ordering::Relaxed);
+            let mut remote_height = self.remote_height.load(atomic::Ordering::Relaxed);
+            // Avoid messages that we synced over 100% (remote height is set on the handshake time)
+            if current_height > remote_height {
+                self.remote_height.store(current_height, atomic::Ordering::Relaxed);
+                remote_height = current_height;
+            }
             let progress = 100.0 * current_height as f64 / remote_height as f64;
             info!("New headers height {}, progress: {:.03}%", current_height, progress);
         }
