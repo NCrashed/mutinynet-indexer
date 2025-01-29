@@ -14,13 +14,17 @@ const NODE_ADDRESS: &'static str = "127.0.0.1:18444";
 
 static INIT: Once = Once::new();
 
-pub fn init_indexer() -> Arc<Indexer> {
+pub fn init_parser() {
     INIT.call_once(|| {
         // Configure logging
         env_logger::builder()
             .filter(None, LevelFilter::Debug)
             .init();
     });
+}
+
+pub fn init_indexer() -> Arc<Indexer> {
+    init_parser();
 
     // Configure indexer and prepare to run
     let indexer = Arc::new(
@@ -42,12 +46,7 @@ pub fn init_indexer() -> Arc<Indexer> {
 }
 
 pub fn init_db() -> Connection {
-    INIT.call_once(|| {
-        // Configure logging
-        env_logger::builder()
-            .filter(None, LevelFilter::Debug)
-            .init();
-    });
+    init_parser();
 
     initialize_db(":memory:", Network::Mutinynet, 0).expect("Database created")
 }

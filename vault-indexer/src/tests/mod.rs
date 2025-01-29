@@ -1,5 +1,6 @@
 mod db;
 mod framework;
+mod parser; 
 
 use framework::*;
 
