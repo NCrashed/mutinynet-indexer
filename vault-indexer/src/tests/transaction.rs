@@ -24,6 +24,10 @@ const REPAY_TX: &'static str = "020000000001026ecd9b9aa19ec5f7157ced55b520064aa3
 // https://mutinynet.com/tx/f2e73cd88d831674670d2c02bd666ebd8666bf88cfb499ba015f797335754132
 const BORROW_TX: &'static str = "020000000001023423c562fcd52239a5d0a1cbdadbd19de89ed88e7b83e2bf7f7929262fec00b40000000000fffffffff9daef83f70e95136f7a33bd63242f1b4aacc2c5d94bfb4950aa27b7bba3a9870100000000ffffffff033b83ea0000000000225120871d4361695a7ee4eef0d85cdc0f558fc9eb9265ed7031f5c66cf8b030f583f29aff0f000000000017a91442089c960c685a1e29a64e0e69b707ccef8fb42d870000000000000000116a580e016200018df8679996390005da230440d35489705088f52f6d17d4a84f7e0f1878b94d9d65d4a6d8184e10401622854444bcc0e0ca3d00d4ff7c6aac2e99dc1da27c5e5a822be08ce4655b1807ef0ba340214c5061daee594f0ca2f581b96acccd3ccbd78d7749bd8fb012a275bc9fd450265248df0071b130e0c0f55a779d5496eeb638dfce5b0006025c87af71d7792f4420d633f4267ea08d94114f586b613ed4ea7517ee30b63a17bd00f7a07e25114aa0ad20604cb84df7bb174100d3b9385ac9b24ecf6e8c444833248a6f18ecb157440ae5ac41c150929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac03bb4182673b9f28abc36b34cf1138743543cb41317159eb6216826149cd064cc044095662c057636b4a8d011011fa8fd183c11079800b69e8ff09d732f2ca31d86989ba7ccc8faf60f5bf50b3de1f5b024fab22ac2fed8fa7c7cf2c8549b6da9be474035312448a784bee2cc822239378017db2f5ea2ddd6923733af6c6459410ba7671fddb3d46f2fa9ed89789850a5b97ad6bca97ed54cb87e488ce28969a3d6890a4420d633f4267ea08d94114f586b613ed4ea7517ee30b63a17bd00f7a07e25114aa0ad20604cb84df7bb174100d3b9385ac9b24ecf6e8c444833248a6f18ecb157440ae5ac21c050929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac000000000";
 
+//
+// https://mutinynet.com/tx/2108fc95cad48ef94a6a103e11bdeeaaf23a7ce9433804c5b0eb4e978b7aac99
+const UNKNOWN_VAULT_TX: &'static str = "02000000000102c7136887ecb61a29bde2b2709ce3f6aa6995b3b41bdaf16cfcc41a5d1c3d6dff0000000000ffffffffc7136887ecb61a29bde2b2709ce3f6aa6995b3b41bdaf16cfcc41a5d1c3d6dff0100000000ffffffff051427000000000000225120da4ec4d4c127e1795120b504bd777e42961a406a2b0d9d6e860ce3e6e26599e41027000000000000225120756939bba0cc7bf3ebf4d3cc89afb00314a48068de61df1e35cebfc35f27eff7807ff80200000000225120a1e3299583843d3bc7f06d609a495ca8f43364320a1fc4bd79416f4718f4d38524cffc020000000016001457a667f4a2988afb6f4f721a1d41c36f642f13360000000000000000296a5826016f0030c629000190d7679a038a00009c40d9ceb8f426ae2006a5224f263433e035430cfbad0140f21f943fd1559f58e0eca398ac1119073366b462d74c3e7160b109df914dad1d5b734e3940ea584565415c7b4edd8a29601dad97ab485550b64a9508f68f166b0440ae66d303c50bb3aba4b141d442c934d1a67f4cf97fb9063c1c47120a3f04dba0721beb26626ba8e258584049d52c8227a6d0a3e5eb3f4fa6f5b3d5f57899b900403d309b636acb65cdb553e022bd62be4def26c83fdfa7017164cb7c45b9fe9600a36d02283fd9c31dca1ad1de304b389b2a6da903e6a464263f6979542712764ffdab01206e61c63538d5e30c8a58e53f0bd1b5437c175aa0e9d7ee51a864327b8aea3be9ad20da4ec4d4c127e1795120b504bd777e42961a406a2b0d9d6e860ce3e6e26599e4ac0063036f726451106170706c69636174696f6e2f6a736f6e52021427001f7b22726576223a302c22746167223a224c75636173222c22766572223a317d680063036f726451106170706c69636174696f6e2f6a736f6e5202244e5321e01170a477e12a8a980bd3465ef4fd13f68c7a63ef9c8fc7e7b22f8ba3d4a16401004ce67b2267706b223a2264613465633464346331323765313739353132306235303462643737376534323936316134303661326230643964366538363063653365366532363539396534222c226d6964223a22386638363630653937343434396561623565633434643461383736376465393930393765613162643539353466336138343766343530306663643837353033646930222c2276706b223a2236653631633633353338643565333063386135386535336630626431623534333763313735616130653964376565353161383634333237623861656133626539222c22766572223a317d6821c150929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac000000000";
+
 // Coinbase tx with op return to test negative case
 // https://mutinynet.com/tx/47233bde6d8c36956286f97651c7e914ea269c6b1766b9e3e2b7edbb03a61c93
 const OTHER_OPRETURN_TX: &'static str = "020000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff0403d1a11bfeffffff02020f2a01000000001600146a8f30e42f81d23c6e24f34c0ecad822b757e4900000000000000000776a24aa21a9edeccfb19cf6b2d78e31d3b6271e1908c4309fd045f7a603fe847d32757cc401a64c4fecc7daa2490047304402203feff7bb9d5e55c8986d5c557dd8ebeaced78e77a15658fe047f90a29f2dcffb022070088299c6b7fad50faad25120df378bb87c3b014d42b8808d7ccbd4be7ef4fa01000120000000000000000000000000000000000000000000000000000000000000000000000000";
@@ -39,10 +43,10 @@ fn parse_other_opreturn() {
 
     let tx_bytes = hex::decode(OTHER_OPRETURN_TX).unwrap();
     let result = VaultTx::from_bytes(&tx_bytes);
-    if let Err(ParseError::NotVaultTx(reason)) = result {
+    if let Err(TxParseError::NotVaultTx(reason)) = result {
         assert_eq!(
             reason,
-            NotVaultReason::MismatchOpPush8(36)
+            VaultParseError::MismatchOpPush8(36)
         );
     } else {
         panic!("Expected error at parsing: {result:?}");
@@ -56,8 +60,8 @@ fn parse_other_unrelated() {
 
     let tx_bytes = hex::decode(OTHER_UNRELATED_TX).unwrap();
     let result = VaultTx::from_bytes(&tx_bytes);
-    if let Err(ParseError::NotVaultTx(reason)) = result {
-        assert_eq!(reason, NotVaultReason::NoOpReturn);
+    if let Err(TxParseError::NotVaultTx(reason)) = result {
+        assert_eq!(reason, VaultParseError::NoOpReturn);
     } else {
         panic!("Expected error at parsing: {result:?}");
     };
@@ -70,7 +74,7 @@ fn parse_open_vault() {
 
     let tx_bytes = hex::decode(OPEN_VAULT_TX).unwrap();
     let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
-    assert_eq!(parsed.version, VaultVersion::Vault1_0); 
+    assert_eq!(parsed.version, VaultVersion::Vault1Legacy); 
     assert_eq!(parsed.action, VaultAction::Open); 
     assert_eq!(parsed.balance, 99094); 
     assert_eq!(parsed.oracle_price, 1392952); 
@@ -86,7 +90,7 @@ fn parse_deposit() {
 
     let tx_bytes = hex::decode(DEPOSIT_TX).unwrap();
     let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
-    assert_eq!(parsed.version, VaultVersion::Vault1_0); 
+    assert_eq!(parsed.version, VaultVersion::Vault1Legacy); 
     assert_eq!(parsed.action, VaultAction::Deposit); 
     assert_eq!(parsed.balance, 101696); 
     assert_eq!(parsed.oracle_price, 197439); 
@@ -102,7 +106,7 @@ fn parse_withdraw() {
 
     let tx_bytes = hex::decode(WITHDRAW_TX).unwrap();
     let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
-    assert_eq!(parsed.version, VaultVersion::Vault1_0); 
+    assert_eq!(parsed.version, VaultVersion::Vault1Legacy); 
     assert_eq!(parsed.action, VaultAction::Withdraw); 
     assert_eq!(parsed.balance, 101696); 
     assert_eq!(parsed.oracle_price, 197439); 
@@ -118,7 +122,7 @@ fn parse_repay() {
 
     let tx_bytes = hex::decode(REPAY_TX).unwrap();
     let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
-    assert_eq!(parsed.version, VaultVersion::Vault1_0); 
+    assert_eq!(parsed.version, VaultVersion::Vault1Legacy); 
     assert_eq!(parsed.action, VaultAction::Repay); 
     assert_eq!(parsed.balance, 101907); 
     assert_eq!(parsed.oracle_price, 0); 
@@ -134,11 +138,27 @@ fn parse_borrow() {
 
     let tx_bytes = hex::decode(BORROW_TX).unwrap();
     let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
-    assert_eq!(parsed.version, VaultVersion::Vault1_0); 
+    assert_eq!(parsed.version, VaultVersion::Vault1Legacy); 
     assert_eq!(parsed.action, VaultAction::Borrow); 
     assert_eq!(parsed.balance, 101880); 
     assert_eq!(parsed.oracle_price, 383523); 
     assert_eq!(parsed.oracle_timestamp, 1738118713); 
     assert_eq!(parsed.liquidation_price, None);
     assert_eq!(parsed.liquidation_hash, None);
+}
+
+#[test]
+#[serial]
+fn parse_unknown() {
+    init_parser();
+
+    let tx_bytes = hex::decode(UNKNOWN_VAULT_TX).unwrap();
+    let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
+    assert_eq!(parsed.version, VaultVersion::Vault1); 
+    assert_eq!(parsed.action, VaultAction::Open); 
+    assert_eq!(parsed.balance, 3196457); 
+    assert_eq!(parsed.oracle_price, 102615); 
+    assert_eq!(parsed.oracle_timestamp, 1738146698); 
+    assert_eq!(parsed.liquidation_price, Some(40000));
+    assert_eq!(parsed.liquidation_hash, Some(hex::decode("d9ceb8f426ae2006a5224f263433e035430cfbad").unwrap().try_into().unwrap()));
 }

@@ -29,6 +29,7 @@ use node::{node_worker, MAX_HEADERS_PER_MSG};
 use crate::{
     cache::headers::HeadersCache,
     db::{self, initialize_db, metadata::DatabaseMeta},
+    vault::VaultTx,
 };
 
 mod event;
@@ -220,7 +221,7 @@ impl Indexer {
         Ok(())
     }
 
-    /// Reaction to the new headers from remote peer. Also requests a batch of blocks if 
+    /// Reaction to the new headers from remote peer. Also requests a batch of blocks if
     /// we synced all headers. Updates the local batch counter for the [on_new_block]
     fn on_new_headers(
         &self,
@@ -286,6 +287,7 @@ impl Indexer {
     ) -> Result<(), Error> {
         let hash = block.header.block_hash();
         debug!("Got block: {}", hash);
+        self.process_block(block)?;
         *batch_left -= 1;
 
         let cache = self
@@ -324,7 +326,7 @@ impl Indexer {
         Ok(())
     }
 
-    /// Remote node will send inventory messages if there are new blocks mined. 
+    /// Remote node will send inventory messages if there are new blocks mined.
     /// Here we request header of that block to trigger sync logic above in [on_new_headers]
     /// and [on_new_block]
     fn on_new_invs(
@@ -349,6 +351,25 @@ impl Indexer {
                     }
                 }
                 _ => (),
+            }
+        }
+        Ok(())
+    }
+
+    /// Iterate over transactions in the block and parse them. Stores the found vault
+    /// transactions in database.
+    fn process_block(&self, block: Block) -> Result<(), Error> {
+        for tx in block.txdata {
+            match VaultTx::from_tx(&tx) {
+                Err(err) => {
+                    if !err.is_definetely_not_vault() {
+                        error!("Got transaction {}, that possible vault related, but we failed to parse with: {}", tx.compute_wtxid(), err);
+                        panic!("Stop here for debug");
+                    }
+                }
+                Ok(vtx) => {
+                    info!("Found a vault transaction: {:#?}", vtx);
+                }
             }
         }
         Ok(())
