@@ -77,6 +77,7 @@ pub struct Indexer {
     headers_cache: Arc<Mutex<HeadersCache>>,
     batch_size: u32,
     remote_height: Arc<AtomicU32>,
+    rescan: bool,
 }
 
 impl Indexer {
@@ -125,6 +126,12 @@ impl Indexer {
         let mut main_receiver = events_bus.add_rx();
         // Make a flag to terminate threads after the main runner exits
         let stop_flag = Arc::new(AtomicBool::new(false));
+
+        // User requested rescan of blocks
+        if self.rescan {
+            let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+            conn.set_scanned_height(self.start_height)?;
+        }
 
         // Connect fain-in and fan-out through dispatcher thread
         thread::spawn(move || {
@@ -383,7 +390,7 @@ impl Indexer {
 // A way to get lazy building behavior where order of settings doesn't affect
 // the result. For instance, setting network after or before node address must not
 // change the result.
-type LazyBuilder<T> = Box<dyn FnOnce() -> Result<T, Error>>;
+type LazyBuilder<T> = Box<dyn FnOnce() -> T>;
 
 /// Builder of indexer allows to specify parameters to the system before actually making a new instance
 /// of the service.
@@ -393,64 +400,74 @@ pub struct IndexerBuilder {
     start_height_builder: LazyBuilder<u32>,
     db_path_builder: LazyBuilder<PathBuf>,
     batch_size_builder: LazyBuilder<u32>,
+    rescan_builder: LazyBuilder<bool>,
 }
 
 impl IndexerBuilder {
     fn new() -> Self {
         IndexerBuilder {
-            network_builder: Box::new(|| Ok(Network::Bitcoin)),
-            node_builder: Box::new(|| Ok("45.79.52.207:38333".to_owned())),
-            start_height_builder: Box::new(|| Ok(0)),
-            db_path_builder: Box::new(|| Ok(":memory:".into())),
-            batch_size_builder: Box::new(|| Ok(500)),
+            network_builder: Box::new(|| Network::Bitcoin),
+            node_builder: Box::new(|| "45.79.52.207:38333".to_owned()),
+            start_height_builder: Box::new(|| 0),
+            db_path_builder: Box::new(|| ":memory:".into()),
+            batch_size_builder: Box::new(|| 500),
+            rescan_builder: Box::new(|| false),
         }
     }
 
     pub fn network(mut self, network: Network) -> Self {
-        self.network_builder = Box::new(move || Ok(network));
+        self.network_builder = Box::new(move || network);
         self
     }
 
     pub fn node<A: Into<String>>(mut self, address: A) -> Self {
         let addr_str: String = address.into();
-        self.node_builder = Box::new(move || Ok(addr_str));
+        self.node_builder = Box::new(move || addr_str);
         self
     }
 
     /// Setup SQlite state path. By default is ":memory:"
     pub fn db<P: AsRef<Path>>(mut self, path: P) -> Self {
         let path_buf = path.as_ref().into();
-        self.db_path_builder = Box::new(move || Ok(path_buf));
+        self.db_path_builder = Box::new(move || path_buf);
         self
     }
 
     /// Setup how many blocks request per one request
     pub fn batch_size(mut self, size: u32) -> Self {
-        self.batch_size_builder = Box::new(move || Ok(size));
+        self.batch_size_builder = Box::new(move || size);
         self
     }
 
     /// From which block to start scanning the blockchain
     pub fn start_height(mut self, height: u32) -> Self {
-        self.start_height_builder = Box::new(move || Ok(height));
+        self.start_height_builder = Box::new(move || height);
         self
     }
 
+    /// If set the block scanning begins from the start height.
+    /// Doesn't reset the headers registry.
+    pub fn rescan(mut self, flag: bool) -> Self {
+        self.rescan_builder = Box::new(move || flag);
+        self
+    }
+    
     pub fn build(self) -> Result<Indexer, Error> {
-        let start_height = (self.start_height_builder)()?;
-        let db_path = (self.db_path_builder)()?;
-        let network = (self.network_builder)()?;
+        let start_height = (self.start_height_builder)();
+        let db_path = (self.db_path_builder)();
+        let network = (self.network_builder)();
         let database = initialize_db(&db_path, network, start_height)?;
         let headers_cache = HeadersCache::load(&database)?;
         Ok(Indexer {
             network,
-            node_address: (self.node_builder)()?,
+            node_address: (self.node_builder)(),
             start_height,
             node_connected: Arc::new(AtomicBool::new(false)),
             database: Arc::new(Mutex::new(database)),
             headers_cache: Arc::new(Mutex::new(headers_cache)),
-            batch_size: (self.batch_size_builder)()?,
+            batch_size: (self.batch_size_builder)(),
             remote_height: Arc::new(AtomicU32::new(0)),
+            rescan: (self.rescan_builder)(),
         })
     }
 }

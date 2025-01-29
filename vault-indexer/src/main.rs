@@ -27,6 +27,11 @@ struct Args {
     /// headers from the genesis.
     #[arg(short, long, default_value_t = 1527651)]
     start_height: u32,
+
+    /// Start scanning blocks from begining (--start-height), doesn't 
+    /// redownload headers.
+    #[arg(long)]
+    rescan: bool,
 }
 
 fn main() -> Result<(), indexer::Error> {
@@ -43,6 +48,7 @@ fn main() -> Result<(), indexer::Error> {
         .db(&args.database)
         .batch_size(args.batch)
         .start_height(args.start_height)
+        .rescan(args.rescan)
         .build();
 
     let indexer = match m_indexer {
