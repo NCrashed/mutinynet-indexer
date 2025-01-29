@@ -4,6 +4,10 @@ use crate::vault::*;
 
 use super::init_parser;
 
+// Open vault tx (height 1807188) $51,052.07 ~ 0.4 998 BTC
+// https://mutinynet.com/tx/226b43bad347e7efb1b3b74f42da790f6b9edd2122532be9f801c74bac6d353b
+const OPEN_VAULT_TX: &'static str = "0200000000010245c49871f1346a7d3eb09b7920d4932c37e1707ed53de1471f2a23c9cf3669930000000000ffffffff45c49871f1346a7d3eb09b7920d4932c37e1707ed53de1471f2a23c9cf3669930100000000ffffffff0514270000000000002251207017dbe1bf7cbb61a9128e09df3668a433a023955e3e437565678dd2f976ed15102700000000000022512078bce6e3cd5174f61b1e1842bbc7e3d1996cef722921bddb2c1d5a6183207e5360a2fa0200000000225120966b6d21f7682f726822746b06046e0e56f32662bd0df3510bfd751d31f60f7a64b0fa0200000000160014d4fb54d79bd7a09108010b85de3ec242523c71b80000000000000000116a580e016f000183166797d7d90015413801406417715c10b9a4dab4585ee747ca13d24c9ff3339c54cebbc903bed35760c5b87d40f609091674c8e0411eb6539ee3d648e72b264eb7ec1415e1756466f7310f034092ac7a004089a0e8ae9803ca3c449e056dd32ba8fd0bb2bf8dd32f3f9a7ef16bc40a4b7605d2bfb37185b554f0c2e10e6b9ad5dac3f538306b6e7d2e91489f9efd3f012027088af775e886db3b4b51eb5289f7aee333ba22716ed98cdb0337c5073c9164ac0063036f726451106170706c69636174696f6e2f6a736f6e52021427004c6d7b22636174223a313733383030343434342c22726576223a302c22746167223a2231222c2276706b223a2232373038386166373735653838366462336234623531656235323839663761656533333362613232373136656439386364623033333763353037336339313634227d680063036f726451106170706c69636174696f6e2f6a736f6e5202244e5321a056e585ebe23726fc7bf4fbc86ad6e88d4d54ec7c9036063bfa2808f5ddc16205004c4d7b227075626b6579223a2232373038386166373735653838366462336234623531656235323839663761656533333362613232373136656439386364623033333763353037336339313634227d6821c150929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac000000000";
+
 // Deposit tx (height 1810900) $3,073.3 ~ 0.03 006 697 BTC
 // https://mutinynet.com/tx/6d45fa47d7c2116bb44b6f42a2993ce7f985f35cd651d3500bf0f5e76724068c
 const DEPOSIT_TX: &'static str = "02000000000102b677cba459b67c74306716271ef62309aa2510344b038b9b7884c05bcc4b2f350000000000ffffffff3c174c33fdf110e5587a1826f6b2672f4e35352a8180f94da74efb713eb42bca010000001716001457524de62f0d5d9e26ffdb41287ce88f9cd0f8c5ffffffff030382dc0000000000225120871d4361695a7ee4eef0d85cdc0f558fc9eb9265ed7031f5c66cf8b030f583f2aad102000000000017a91442089c960c685a1e29a64e0e69b707ccef8fb42d870000000000000000116a580e016400018d40679999c90003033f04401367fe4a997f3db9bddd53685d7317f74aa7baff8dcc46be2f5ba184f15dbbbba055e5369517318d614f44f246b6695d99f7c1964de114457cdba9a9290d3d56404b1bf0d94f3ae886eea33869d8163e1a08eb207dd4babb53f86a2ef482fa660e16a7ee50f3f6cc14de0680fb6f12d4004191f394616f0642b7947a516f827f6b4420d633f4267ea08d94114f586b613ed4ea7517ee30b63a17bd00f7a07e25114aa0ad20604cb84df7bb174100d3b9385ac9b24ecf6e8c444833248a6f18ecb157440ae5ac41c150929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac03bb4182673b9f28abc36b34cf1138743543cb41317159eb6216826149cd064cc0247304402202dee1ce597bea70bffc9e9e329d6c7935ee5b58022669448814be37232cc6f24022021107c7258439e567cd39489b47d30b813873cf0791a532107af58e060aa75ae012102c2d81859351e3837b8b986cf9a457bc5b1db6816611abbd19df3dc7a3bb76b5700000000";
@@ -19,10 +23,6 @@ const REPAY_TX: &'static str = "020000000001026ecd9b9aa19ec5f7157ced55b520064aa3
 // Borrow tx (height 1810671) $1,983.66 ~ 1,983.66 UNIT
 // https://mutinynet.com/tx/f2e73cd88d831674670d2c02bd666ebd8666bf88cfb499ba015f797335754132
 const BORROW_TX: &'static str = "020000000001023423c562fcd52239a5d0a1cbdadbd19de89ed88e7b83e2bf7f7929262fec00b40000000000fffffffff9daef83f70e95136f7a33bd63242f1b4aacc2c5d94bfb4950aa27b7bba3a9870100000000ffffffff033b83ea0000000000225120871d4361695a7ee4eef0d85cdc0f558fc9eb9265ed7031f5c66cf8b030f583f29aff0f000000000017a91442089c960c685a1e29a64e0e69b707ccef8fb42d870000000000000000116a580e016200018df8679996390005da230440d35489705088f52f6d17d4a84f7e0f1878b94d9d65d4a6d8184e10401622854444bcc0e0ca3d00d4ff7c6aac2e99dc1da27c5e5a822be08ce4655b1807ef0ba340214c5061daee594f0ca2f581b96acccd3ccbd78d7749bd8fb012a275bc9fd450265248df0071b130e0c0f55a779d5496eeb638dfce5b0006025c87af71d7792f4420d633f4267ea08d94114f586b613ed4ea7517ee30b63a17bd00f7a07e25114aa0ad20604cb84df7bb174100d3b9385ac9b24ecf6e8c444833248a6f18ecb157440ae5ac41c150929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac03bb4182673b9f28abc36b34cf1138743543cb41317159eb6216826149cd064cc044095662c057636b4a8d011011fa8fd183c11079800b69e8ff09d732f2ca31d86989ba7ccc8faf60f5bf50b3de1f5b024fab22ac2fed8fa7c7cf2c8549b6da9be474035312448a784bee2cc822239378017db2f5ea2ddd6923733af6c6459410ba7671fddb3d46f2fa9ed89789850a5b97ad6bca97ed54cb87e488ce28969a3d6890a4420d633f4267ea08d94114f586b613ed4ea7517ee30b63a17bd00f7a07e25114aa0ad20604cb84df7bb174100d3b9385ac9b24ecf6e8c444833248a6f18ecb157440ae5ac21c050929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac000000000";
-
-// Open vault tx (height 1807188) $51,052.07 ~ 0.4 998 BTC
-// https://mutinynet.com/tx/226b43bad347e7efb1b3b74f42da790f6b9edd2122532be9f801c74bac6d353b
-const OPEN_VAULT_TX: &'static str = "0200000000010245c49871f1346a7d3eb09b7920d4932c37e1707ed53de1471f2a23c9cf3669930000000000ffffffff45c49871f1346a7d3eb09b7920d4932c37e1707ed53de1471f2a23c9cf3669930100000000ffffffff0514270000000000002251207017dbe1bf7cbb61a9128e09df3668a433a023955e3e437565678dd2f976ed15102700000000000022512078bce6e3cd5174f61b1e1842bbc7e3d1996cef722921bddb2c1d5a6183207e5360a2fa0200000000225120966b6d21f7682f726822746b06046e0e56f32662bd0df3510bfd751d31f60f7a64b0fa0200000000160014d4fb54d79bd7a09108010b85de3ec242523c71b80000000000000000116a580e016f000183166797d7d90015413801406417715c10b9a4dab4585ee747ca13d24c9ff3339c54cebbc903bed35760c5b87d40f609091674c8e0411eb6539ee3d648e72b264eb7ec1415e1756466f7310f034092ac7a004089a0e8ae9803ca3c449e056dd32ba8fd0bb2bf8dd32f3f9a7ef16bc40a4b7605d2bfb37185b554f0c2e10e6b9ad5dac3f538306b6e7d2e91489f9efd3f012027088af775e886db3b4b51eb5289f7aee333ba22716ed98cdb0337c5073c9164ac0063036f726451106170706c69636174696f6e2f6a736f6e52021427004c6d7b22636174223a313733383030343434342c22726576223a302c22746167223a2231222c2276706b223a2232373038386166373735653838366462336234623531656235323839663761656533333362613232373136656439386364623033333763353037336339313634227d680063036f726451106170706c69636174696f6e2f6a736f6e5202244e5321a056e585ebe23726fc7bf4fbc86ad6e88d4d54ec7c9036063bfa2808f5ddc16205004c4d7b227075626b6579223a2232373038386166373735653838366462336234623531656235323839663761656533333362613232373136656439386364623033333763353037336339313634227d6821c150929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac000000000";
 
 // Coinbase tx with op return to test negative case
 // https://mutinynet.com/tx/47233bde6d8c36956286f97651c7e914ea269c6b1766b9e3e2b7edbb03a61c93
@@ -42,7 +42,7 @@ fn parse_other_opreturn() {
     if let Err(ParseError::NotVaultTx(reason)) = result {
         assert_eq!(
             reason,
-            NotVaultReason::WrongVersion(36)
+            NotVaultReason::MismatchOpPush8(36)
         );
     } else {
         panic!("Expected error at parsing: {result:?}");
@@ -65,16 +65,80 @@ fn parse_other_unrelated() {
 
 #[test]
 #[serial]
+fn parse_open_vault() {
+    init_parser();
+
+    let tx_bytes = hex::decode(OPEN_VAULT_TX).unwrap();
+    let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
+    assert_eq!(parsed.version, VaultVersion::Vault1_0); 
+    assert_eq!(parsed.action, VaultAction::Open); 
+    assert_eq!(parsed.balance, 99094); 
+    assert_eq!(parsed.oracle_price, 1392952); 
+    assert_eq!(parsed.oracle_timestamp, 1738004441); 
+    assert_eq!(parsed.liquidation_price, None);
+    assert_eq!(parsed.liquidation_hash, None);
+}
+
+#[test]
+#[serial]
 fn parse_deposit() {
     init_parser();
 
     let tx_bytes = hex::decode(DEPOSIT_TX).unwrap();
     let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
-    assert_eq!(parsed.version, VaultVersion::Vault1_0);
-    assert_eq!(parsed.action, VaultAction::Deposit);
-    assert_eq!(parsed.balance, 307330);
-    assert_eq!(parsed.oracle_price, 0);
-    assert_eq!(parsed.oracle_timestamp, 0);
-    assert_eq!(parsed.liquidation_price, 0);
-    assert_eq!(parsed.liquidation_hash.to_vec(), hex::decode("0").unwrap());
+    assert_eq!(parsed.version, VaultVersion::Vault1_0); 
+    assert_eq!(parsed.action, VaultAction::Deposit); 
+    assert_eq!(parsed.balance, 101696); 
+    assert_eq!(parsed.oracle_price, 197439); 
+    assert_eq!(parsed.oracle_timestamp, 1738119625); 
+    assert_eq!(parsed.liquidation_price, None);
+    assert_eq!(parsed.liquidation_hash, None);
+}
+
+#[test]
+#[serial]
+fn parse_withdraw() {
+    init_parser();
+
+    let tx_bytes = hex::decode(WITHDRAW_TX).unwrap();
+    let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
+    assert_eq!(parsed.version, VaultVersion::Vault1_0); 
+    assert_eq!(parsed.action, VaultAction::Withdraw); 
+    assert_eq!(parsed.balance, 101696); 
+    assert_eq!(parsed.oracle_price, 197439); 
+    assert_eq!(parsed.oracle_timestamp, 1738119552); 
+    assert_eq!(parsed.liquidation_price, None);
+    assert_eq!(parsed.liquidation_hash, None);
+}
+
+#[test]
+#[serial]
+fn parse_repay() {
+    init_parser();
+
+    let tx_bytes = hex::decode(REPAY_TX).unwrap();
+    let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
+    assert_eq!(parsed.version, VaultVersion::Vault1_0); 
+    assert_eq!(parsed.action, VaultAction::Repay); 
+    assert_eq!(parsed.balance, 101907); 
+    assert_eq!(parsed.oracle_price, 0); 
+    assert_eq!(parsed.oracle_timestamp, 1738120994); 
+    assert_eq!(parsed.liquidation_price, None);
+    assert_eq!(parsed.liquidation_hash, None);
+}
+
+#[test]
+#[serial]
+fn parse_borrow() {
+    init_parser();
+
+    let tx_bytes = hex::decode(BORROW_TX).unwrap();
+    let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
+    assert_eq!(parsed.version, VaultVersion::Vault1_0); 
+    assert_eq!(parsed.action, VaultAction::Borrow); 
+    assert_eq!(parsed.balance, 101880); 
+    assert_eq!(parsed.oracle_price, 383523); 
+    assert_eq!(parsed.oracle_timestamp, 1738118713); 
+    assert_eq!(parsed.liquidation_price, None);
+    assert_eq!(parsed.liquidation_hash, None);
 }

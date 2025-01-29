@@ -1,4 +1,8 @@
-use bitcoin::{consensus::Decodable, opcodes::all::{OP_PUSHBYTES_14, OP_PUSHBYTES_8, OP_PUSHNUM_8, OP_RETURN}, Script, Transaction};
+use bitcoin::{
+    consensus::Decodable,
+    opcodes::all::{OP_PUSHBYTES_14, OP_PUSHBYTES_8, OP_PUSHNUM_8, OP_RETURN},
+    Script, Transaction,
+};
 use core::{assert_eq, fmt::Display};
 use log::*;
 use std::io::Cursor;
@@ -11,35 +15,29 @@ use thiserror::Error;
 #[repr(u8)]
 pub enum VaultAction {
     // Open new vault
-    Open = 0x64,
+    Open = 0x6f,
     // Deposit BTC
-    Deposit,
+    Deposit = 0x64,
     // Withdraw BTC
-    Withdraw,
+    Withdraw = 0x77,
     // Borrow UNIT
-    Borrow,
+    Borrow = 0x62,
     // Repay UNIT
-    Repay,
+    Repay = 0x72,
 }
 
 impl VaultAction {
     pub fn to_protocol(&self) -> u8 {
-        match self {
-            VaultAction::Open => 0x64,
-            VaultAction::Deposit => 1,
-            VaultAction::Withdraw => 2,
-            VaultAction::Borrow => 3,
-            VaultAction::Repay => 4,
-        }
+        *self as u8
     }
 
     pub fn from_protocol(v: u8) -> Option<Self> {
         match v {
-            0x64 => Some(VaultAction::Open),
-            1 => Some(VaultAction::Deposit),
-            2 => Some(VaultAction::Withdraw),
-            3 => Some(VaultAction::Borrow),
-            4 => Some(VaultAction::Repay),
+            0x6f => Some(VaultAction::Open),
+            0x64 => Some(VaultAction::Deposit),
+            0x77 => Some(VaultAction::Withdraw),
+            0x62 => Some(VaultAction::Borrow),
+            0x72 => Some(VaultAction::Repay),
             _ => None,
         }
     }
@@ -80,7 +78,8 @@ pub type UnitAmount = u32;
 pub type OraclePrice = u32;
 
 /// Liquidation hash stored in byte array
-pub type LiquidationHash = [u8; 32];
+//pub type LiquidationHash = [u8; 32];
+pub type LiquidationHash = Vec<u8>;
 
 /// Contains metadata about the vault transaction
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -100,9 +99,9 @@ pub struct VaultTx {
     /// UNIX timestamp of the oracle
     pub oracle_timestamp: u32,
     /// The price when liquidation will happen
-    pub liquidation_price: OraclePrice,
+    pub liquidation_price: Option<OraclePrice>,
     /// Hash of the liquidation
-    pub liquidation_hash: LiquidationHash,
+    pub liquidation_hash: Option<LiquidationHash>,
 }
 
 /// Fields that we expect in the op_return payload
@@ -131,11 +130,11 @@ pub enum NotVaultReason {
     #[error("No OP_PUSHNUM_8 after OP_RETURN")]
     NoOpPush8,
     #[error("Expected OP_PUSHNUM_8 but got opcode {0}")]
-    MismatchOpPush8(u8), 
+    MismatchOpPush8(u8),
     #[error("No OP_PUSHBYTES_14 after OP_RETURN")]
     NoOpPushbytes14,
     #[error("Expected OP_PUSHBYTES_14 but got opcode {0}")]
-    MismatchOpPushbytes14(u8), 
+    MismatchOpPushbytes14(u8),
     #[error("Missing {0} field")]
     MissingField(MissingVaultField),
     #[error("Not expected version {0}")]
@@ -179,7 +178,9 @@ impl VaultTx {
             .next()
             .ok_or(ParseError::NotVaultTx(NotVaultReason::NoOpPush8))?;
         if op_pushnum_8 != OP_PUSHNUM_8.to_u8() {
-            return Err(ParseError::NotVaultTx(NotVaultReason::MismatchOpPush8(op_pushnum_8)))
+            return Err(ParseError::NotVaultTx(NotVaultReason::MismatchOpPush8(
+                op_pushnum_8,
+            )));
         }
 
         // Skip op_push14
@@ -187,7 +188,9 @@ impl VaultTx {
             .next()
             .ok_or(ParseError::NotVaultTx(NotVaultReason::NoOpPushbytes14))?;
         if op_pushbytes_14 != OP_PUSHBYTES_14.to_u8() {
-            return Err(ParseError::NotVaultTx(NotVaultReason::MismatchOpPushbytes14(op_pushbytes_14)))
+            return Err(ParseError::NotVaultTx(
+                NotVaultReason::MismatchOpPushbytes14(op_pushbytes_14),
+            ));
         }
 
         // Parse version field
@@ -216,25 +219,31 @@ impl VaultTx {
         let balance = instructions.next_u32_be().ok_or(ParseError::NotVaultTx(
             NotVaultReason::MissingField(MissingVaultField::Balance),
         ))?;
-        // Fetch oracle price
-        let oracle_price = instructions.next_u32_be().ok_or(ParseError::NotVaultTx(
-            NotVaultReason::MissingField(MissingVaultField::OraclePrice),
-        ))?;
+        // Note that in requirements the timestamp is going BEFORE the price, but in the 
+        // blockchain it is as here.
         // Fetch oracle timestamp
         let oracle_timestamp = instructions.next_u32_be().ok_or(ParseError::NotVaultTx(
             NotVaultReason::MissingField(MissingVaultField::OracleTimestamp),
         ))?;
-        // Fetch liqudation price
-        let liquidation_price = instructions.next_u32_be().ok_or(ParseError::NotVaultTx(
-            NotVaultReason::MissingField(MissingVaultField::LiquidationPrice),
+        // Fetch oracle price
+        let oracle_price = instructions.next_u32_be().ok_or(ParseError::NotVaultTx(
+            NotVaultReason::MissingField(MissingVaultField::OraclePrice),
         ))?;
+
+        // Fetch liqudation price
+        // let liquidation_price = instructions.next_u32_be().ok_or(ParseError::NotVaultTx(
+        //     NotVaultReason::MissingField(MissingVaultField::LiquidationPrice),
+        // ))?;
+        let liquidation_price = instructions.next_u32_be();
+
         // Take remaining bytes as hash
-        let liquidation_hash =
-            instructions
-                .next32()
-                .ok_or(ParseError::NotVaultTx(NotVaultReason::MissingField(
-                    MissingVaultField::LiquidationHash,
-                )))?;
+        // let liquidation_hash =
+        //     instructions
+        //         .next32()
+        //         .ok_or(ParseError::NotVaultTx(NotVaultReason::MissingField(
+        //             MissingVaultField::LiquidationHash,
+        //         )))?;
+        let liquidation_hash = instructions.collect::<Vec<_>>();
 
         Ok(VaultTx {
             txid: tx.compute_wtxid(),
@@ -245,7 +254,11 @@ impl VaultTx {
             oracle_price,
             oracle_timestamp,
             liquidation_price,
-            liquidation_hash,
+            liquidation_hash: if liquidation_hash.is_empty() {
+                None
+            } else {
+                Some(liquidation_hash)
+            },
         })
     }
 }
