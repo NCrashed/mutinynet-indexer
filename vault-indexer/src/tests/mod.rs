@@ -1,6 +1,6 @@
 mod db;
 mod framework;
-mod transaction; 
+mod transaction;
 
 use framework::*;
 

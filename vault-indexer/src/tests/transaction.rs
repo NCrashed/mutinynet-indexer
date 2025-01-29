@@ -44,10 +44,7 @@ fn parse_other_opreturn() {
     let tx_bytes = hex::decode(OTHER_OPRETURN_TX).unwrap();
     let result = VaultTx::from_bytes(&tx_bytes);
     if let Err(TxParseError::NotVaultTx(reason)) = result {
-        assert_eq!(
-            reason,
-            VaultParseError::MismatchOpPush8(36)
-        );
+        assert_eq!(reason, VaultParseError::MismatchOpPush8(36));
     } else {
         panic!("Expected error at parsing: {result:?}");
     };
@@ -74,11 +71,11 @@ fn parse_open_vault() {
 
     let tx_bytes = hex::decode(OPEN_VAULT_TX).unwrap();
     let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
-    assert_eq!(parsed.version, VaultVersion::Vault1Legacy); 
-    assert_eq!(parsed.action, VaultAction::Open); 
-    assert_eq!(parsed.balance, 99094); 
-    assert_eq!(parsed.oracle_price, 1392952); 
-    assert_eq!(parsed.oracle_timestamp, 1738004441); 
+    assert_eq!(parsed.version, VaultVersion::Vault1Legacy);
+    assert_eq!(parsed.action, VaultAction::Open);
+    assert_eq!(parsed.balance, 99094);
+    assert_eq!(parsed.oracle_price, 1392952);
+    assert_eq!(parsed.oracle_timestamp, 1738004441);
     assert_eq!(parsed.liquidation_price, None);
     assert_eq!(parsed.liquidation_hash, None);
 }
@@ -90,11 +87,11 @@ fn parse_deposit() {
 
     let tx_bytes = hex::decode(DEPOSIT_TX).unwrap();
     let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
-    assert_eq!(parsed.version, VaultVersion::Vault1Legacy); 
-    assert_eq!(parsed.action, VaultAction::Deposit); 
-    assert_eq!(parsed.balance, 101696); 
-    assert_eq!(parsed.oracle_price, 197439); 
-    assert_eq!(parsed.oracle_timestamp, 1738119625); 
+    assert_eq!(parsed.version, VaultVersion::Vault1Legacy);
+    assert_eq!(parsed.action, VaultAction::Deposit);
+    assert_eq!(parsed.balance, 101696);
+    assert_eq!(parsed.oracle_price, 197439);
+    assert_eq!(parsed.oracle_timestamp, 1738119625);
     assert_eq!(parsed.liquidation_price, None);
     assert_eq!(parsed.liquidation_hash, None);
 }
@@ -106,11 +103,11 @@ fn parse_withdraw() {
 
     let tx_bytes = hex::decode(WITHDRAW_TX).unwrap();
     let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
-    assert_eq!(parsed.version, VaultVersion::Vault1Legacy); 
-    assert_eq!(parsed.action, VaultAction::Withdraw); 
-    assert_eq!(parsed.balance, 101696); 
-    assert_eq!(parsed.oracle_price, 197439); 
-    assert_eq!(parsed.oracle_timestamp, 1738119552); 
+    assert_eq!(parsed.version, VaultVersion::Vault1Legacy);
+    assert_eq!(parsed.action, VaultAction::Withdraw);
+    assert_eq!(parsed.balance, 101696);
+    assert_eq!(parsed.oracle_price, 197439);
+    assert_eq!(parsed.oracle_timestamp, 1738119552);
     assert_eq!(parsed.liquidation_price, None);
     assert_eq!(parsed.liquidation_hash, None);
 }
@@ -122,11 +119,11 @@ fn parse_repay() {
 
     let tx_bytes = hex::decode(REPAY_TX).unwrap();
     let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
-    assert_eq!(parsed.version, VaultVersion::Vault1Legacy); 
-    assert_eq!(parsed.action, VaultAction::Repay); 
-    assert_eq!(parsed.balance, 101907); 
-    assert_eq!(parsed.oracle_price, 0); 
-    assert_eq!(parsed.oracle_timestamp, 1738120994); 
+    assert_eq!(parsed.version, VaultVersion::Vault1Legacy);
+    assert_eq!(parsed.action, VaultAction::Repay);
+    assert_eq!(parsed.balance, 101907);
+    assert_eq!(parsed.oracle_price, 0);
+    assert_eq!(parsed.oracle_timestamp, 1738120994);
     assert_eq!(parsed.liquidation_price, None);
     assert_eq!(parsed.liquidation_hash, None);
 }
@@ -138,11 +135,11 @@ fn parse_borrow() {
 
     let tx_bytes = hex::decode(BORROW_TX).unwrap();
     let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
-    assert_eq!(parsed.version, VaultVersion::Vault1Legacy); 
-    assert_eq!(parsed.action, VaultAction::Borrow); 
-    assert_eq!(parsed.balance, 101880); 
-    assert_eq!(parsed.oracle_price, 383523); 
-    assert_eq!(parsed.oracle_timestamp, 1738118713); 
+    assert_eq!(parsed.version, VaultVersion::Vault1Legacy);
+    assert_eq!(parsed.action, VaultAction::Borrow);
+    assert_eq!(parsed.balance, 101880);
+    assert_eq!(parsed.oracle_price, 383523);
+    assert_eq!(parsed.oracle_timestamp, 1738118713);
     assert_eq!(parsed.liquidation_price, None);
     assert_eq!(parsed.liquidation_hash, None);
 }
@@ -154,11 +151,19 @@ fn parse_unknown() {
 
     let tx_bytes = hex::decode(UNKNOWN_VAULT_TX).unwrap();
     let parsed = VaultTx::from_bytes(&tx_bytes).expect("valid vault tx");
-    assert_eq!(parsed.version, VaultVersion::Vault1); 
-    assert_eq!(parsed.action, VaultAction::Open); 
-    assert_eq!(parsed.balance, 3196457); 
-    assert_eq!(parsed.oracle_price, 102615); 
-    assert_eq!(parsed.oracle_timestamp, 1738146698); 
+    assert_eq!(parsed.version, VaultVersion::Vault1);
+    assert_eq!(parsed.action, VaultAction::Open);
+    assert_eq!(parsed.balance, 3196457);
+    assert_eq!(parsed.oracle_price, 102615);
+    assert_eq!(parsed.oracle_timestamp, 1738146698);
     assert_eq!(parsed.liquidation_price, Some(40000));
-    assert_eq!(parsed.liquidation_hash, Some(hex::decode("d9ceb8f426ae2006a5224f263433e035430cfbad").unwrap().try_into().unwrap()));
+    assert_eq!(
+        parsed.liquidation_hash,
+        Some(
+            hex::decode("d9ceb8f426ae2006a5224f263433e035430cfbad")
+                .unwrap()
+                .try_into()
+                .unwrap()
+        )
+    );
 }
