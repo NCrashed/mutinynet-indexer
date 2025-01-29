@@ -1,6 +1,6 @@
 use bitcoin::{
     consensus::Decodable,
-    opcodes::all::{OP_PUSHBYTES_14, OP_PUSHBYTES_8, OP_PUSHNUM_8, OP_RETURN},
+    opcodes::all::{OP_PUSHBYTES_14, OP_PUSHNUM_8, OP_RETURN},
     Script, Transaction,
 };
 use core::{assert_eq, fmt::Display};

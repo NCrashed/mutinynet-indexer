@@ -1,4 +1,8 @@
-use bitcoin::p2p::{message::NetworkMessage, message_blockdata::Inventory};
+use bitcoin::{
+    block::Header,
+    p2p::{message::NetworkMessage, message_blockdata::Inventory},
+    Block,
+};
 use bus::Bus;
 use core::{
     result::Result,
@@ -11,7 +15,11 @@ pub use network::Network;
 use rusqlite::Connection;
 use std::{
     path::{Path, PathBuf},
-    sync::{mpmc, mpsc::SendError, Arc, Mutex},
+    sync::{
+        mpmc::{self, Sender},
+        mpsc::SendError,
+        Arc, Mutex,
+    },
 };
 use std::{sync::mpmc::sync_channel, thread};
 use thiserror::Error;
@@ -166,20 +174,7 @@ impl Indexer {
                     return Err(Error::EventBusRecv);
                 }
                 Ok(Event::Handshaked(remote_height)) => {
-                    self.node_connected.store(true, atomic::Ordering::Relaxed);
-                    self.remote_height
-                        .store(remote_height, atomic::Ordering::Relaxed);
-
-                    // start requesting headers
-                    trace!("Requesting first headers");
-                    let cache = self
-                        .headers_cache
-                        .lock()
-                        .map_err(|_| Error::HeadersCacheLock)?;
-                    let headers_msg = cache.make_get_headers()?;
-                    events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
-                        headers_msg,
-                    )))?
+                    self.on_handshake(remote_height, &events_sender)?
                 }
                 Ok(Event::Disconnected) => {
                     self.node_connected.store(false, atomic::Ordering::Relaxed);
@@ -189,119 +184,173 @@ impl Indexer {
                         events_sender.send(Event::OutcomingMessage(NetworkMessage::Pong(nonce)))?
                     }
                     NetworkMessage::Headers(headers) => {
-                        debug!("Got {} headers from remote node", headers.len());
-                        {
-                            // Very important to lock first on the cache and next to the connection everywhere or we can deadlock
-                            let mut cache = self
-                                .headers_cache
-                                .lock()
-                                .map_err(|_| Error::HeadersCacheLock)?;
-                            cache.update_longest_chain(&headers)?;
-                            let mut conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
-                            cache.store(&mut conn)?;
-                            info!("New headers height: {}", cache.get_current_height());
-                        }
-
-                        if headers.len() == MAX_HEADERS_PER_MSG {
-                            let headers_msg = {
-                                let cache = self
-                                    .headers_cache
-                                    .lock()
-                                    .map_err(|_| Error::HeadersCacheLock)?;
-                                cache.make_get_headers()?
-                            };
-                            debug!("Requesting next headers batch");
-                            events_sender.send(Event::OutcomingMessage(
-                                NetworkMessage::GetHeaders(headers_msg),
-                            ))?
-                        } else {
-                            // Request blocks to scan
-                            let cache = self
-                                .headers_cache
-                                .lock()
-                                .map_err(|_| Error::HeadersCacheLock)?;
-                            let height = cache.get_current_height();
-                            let scanned_height = {
-                                let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
-                                conn.get_scanned_height()?
-                            };
-
-                            let msg: NetworkMessage =
-                                cache.make_get_blocks(scanned_height, self.batch_size)?;
-                            events_sender.send(Event::OutcomingMessage(msg))?;
-                            // Remember how much blocks we expect
-                            let actual_batch = self.batch_size.min(height - scanned_height + 1);
-                            debug!("Request {} blocks", actual_batch);
-                            batch_left += actual_batch;
-                        }
+                        self.on_new_headers(headers, &events_sender, &mut batch_left)?
                     }
-                    NetworkMessage::Block(block) => {
-                        let hash = block.header.block_hash();
-                        debug!("Got block: {}", hash);
-                        batch_left -= 1;
-
-                        let cache = self
-                            .headers_cache
-                            .lock()
-                            .map_err(|_| Error::HeadersCacheLock)?;
-                        // Remember max height we scanned
-                        max_scanned_height = {
-                            let record = cache.get_header(hash)?;
-                            max_scanned_height.max(record.height)
-                        };
-                        // Scanned all blocks from batch, request next one
-                        trace!("Batch left: {}", batch_left);
-                        if batch_left <= 0 {
-                            // Display progress
-                            let height = cache.get_current_height();
-                            let scanned_part = 100.0 * max_scanned_height as f64 / height as f64;
-                            info!(
-                                "Scanned {}/{} {:.03}%",
-                                max_scanned_height, height, scanned_part
-                            );
-
-                            // Store how much we scanned
-                            let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
-                            conn.set_scanned_height(max_scanned_height)?;
-
-                            if max_scanned_height < height {
-                                let msg: NetworkMessage =
-                                    cache.make_get_blocks(max_scanned_height, self.batch_size)?;
-                                events_sender.send(Event::OutcomingMessage(msg))?;
-                                let actual_batch =
-                                    self.batch_size.min(height - max_scanned_height + 1);
-                                debug!("Request {} blocks", actual_batch);
-                                batch_left += actual_batch;
-                            }
-                        }
-                    }
-                    NetworkMessage::Inv(invs) => {
-                        for inv in invs {
-                            match inv {
-                                Inventory::Block(hash) => {
-                                    let cache = self
-                                        .headers_cache
-                                        .lock()
-                                        .map_err(|_| Error::HeadersCacheLock)?;
-
-                                    // Check if we know the header
-                                    if cache.get_header(hash).is_err() {
-                                        let headers_msg = cache.make_get_headers()?;
-                                        events_sender.send(Event::OutcomingMessage(
-                                            NetworkMessage::GetHeaders(headers_msg),
-                                        ))?;
-                                    }
-                                }
-                                _ => (),
-                            }
-                        }
-                    }
+                    NetworkMessage::Block(block) => self.on_new_block(
+                        block,
+                        &events_sender,
+                        &mut batch_left,
+                        &mut max_scanned_height,
+                    )?,
+                    NetworkMessage::Inv(invs) => self.on_new_invs(invs, &events_sender)?,
                     _ => (),
                 },
                 _ => (),
             }
         }
 
+        Ok(())
+    }
+
+    fn on_handshake(&self, remote_height: u32, events_sender: &Sender<Event>) -> Result<(), Error> {
+        self.node_connected.store(true, atomic::Ordering::Relaxed);
+        self.remote_height
+            .store(remote_height, atomic::Ordering::Relaxed);
+
+        // start requesting headers
+        trace!("Requesting first headers");
+        let cache = self
+            .headers_cache
+            .lock()
+            .map_err(|_| Error::HeadersCacheLock)?;
+        let headers_msg = cache.make_get_headers()?;
+        events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
+            headers_msg,
+        )))?;
+        Ok(())
+    }
+
+    /// Reaction to the new headers from remote peer. Also requests a batch of blocks if 
+    /// we synced all headers. Updates the local batch counter for the [on_new_block]
+    fn on_new_headers(
+        &self,
+        headers: Vec<Header>,
+        events_sender: &Sender<Event>,
+        batch_left: &mut i64,
+    ) -> Result<(), Error> {
+        debug!("Got {} headers from remote node", headers.len());
+        {
+            // Very important to lock first on the cache and next to the connection everywhere or we can deadlock
+            let mut cache = self
+                .headers_cache
+                .lock()
+                .map_err(|_| Error::HeadersCacheLock)?;
+            cache.update_longest_chain(&headers)?;
+            let mut conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+            cache.store(&mut conn)?;
+            info!("New headers height: {}", cache.get_current_height());
+        }
+
+        if headers.len() == MAX_HEADERS_PER_MSG {
+            let headers_msg = {
+                let cache = self
+                    .headers_cache
+                    .lock()
+                    .map_err(|_| Error::HeadersCacheLock)?;
+                cache.make_get_headers()?
+            };
+            debug!("Requesting next headers batch");
+            events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
+                headers_msg,
+            )))?
+        } else {
+            // Request blocks to scan
+            let cache = self
+                .headers_cache
+                .lock()
+                .map_err(|_| Error::HeadersCacheLock)?;
+            let height = cache.get_current_height();
+            let scanned_height = {
+                let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+                conn.get_scanned_height()?
+            };
+
+            let msg: NetworkMessage = cache.make_get_blocks(scanned_height, self.batch_size)?;
+            events_sender.send(Event::OutcomingMessage(msg))?;
+            // Remember how much blocks we expect
+            let actual_batch = self.batch_size.min(height - scanned_height + 1);
+            debug!("Request {} blocks", actual_batch);
+            *batch_left += actual_batch as i64;
+        }
+        Ok(())
+    }
+
+    /// React on new arrived block. Also updates the local information how many blocks left in batches and
+    /// cached maximum height of that batch.
+    fn on_new_block(
+        &self,
+        block: Block,
+        events_sender: &Sender<Event>,
+        batch_left: &mut i64,
+        max_scanned_height: &mut u32,
+    ) -> Result<(), Error> {
+        let hash = block.header.block_hash();
+        debug!("Got block: {}", hash);
+        *batch_left -= 1;
+
+        let cache = self
+            .headers_cache
+            .lock()
+            .map_err(|_| Error::HeadersCacheLock)?;
+        // Remember max height we scanned
+        let scanned_height = {
+            let record = cache.get_header(hash)?;
+            (*max_scanned_height).max(record.height)
+        };
+        *max_scanned_height = scanned_height;
+        // Scanned all blocks from batch, request next one
+        trace!("Batch left: {}", batch_left);
+        if *batch_left <= 0 {
+            // Display progress
+            let height = cache.get_current_height();
+            let scanned_part = 100.0 * scanned_height as f64 / height as f64;
+            info!(
+                "Scanned {}/{} {:.03}%",
+                scanned_height, height, scanned_part
+            );
+
+            // Store how much we scanned
+            let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+            conn.set_scanned_height(scanned_height)?;
+
+            if scanned_height < height {
+                let msg: NetworkMessage = cache.make_get_blocks(scanned_height, self.batch_size)?;
+                events_sender.send(Event::OutcomingMessage(msg))?;
+                let actual_batch = self.batch_size.min(height - scanned_height + 1);
+                debug!("Request {} blocks", actual_batch);
+                *batch_left += actual_batch as i64;
+            }
+        }
+        Ok(())
+    }
+
+    /// Remote node will send inventory messages if there are new blocks mined. 
+    /// Here we request header of that block to trigger sync logic above in [on_new_headers]
+    /// and [on_new_block]
+    fn on_new_invs(
+        &self,
+        invs: Vec<Inventory>,
+        events_sender: &Sender<Event>,
+    ) -> Result<(), Error> {
+        for inv in invs {
+            match inv {
+                Inventory::Block(hash) => {
+                    let cache = self
+                        .headers_cache
+                        .lock()
+                        .map_err(|_| Error::HeadersCacheLock)?;
+
+                    // Check if we know the header
+                    if cache.get_header(hash).is_err() {
+                        let headers_msg = cache.make_get_headers()?;
+                        events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
+                            headers_msg,
+                        )))?;
+                    }
+                }
+                _ => (),
+            }
+        }
         Ok(())
     }
 }
