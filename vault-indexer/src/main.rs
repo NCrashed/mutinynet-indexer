@@ -25,7 +25,7 @@ struct Args {
 
     /// The height of blockhcain we start scanning from. Note that we still need download all
     /// headers from the genesis.
-    #[arg(short, long, default_value_t = 0)]
+    #[arg(short, long, default_value_t = 1527651)]
     start_height: u32,
 }
 

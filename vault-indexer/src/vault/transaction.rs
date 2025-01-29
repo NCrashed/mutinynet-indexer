@@ -26,6 +26,12 @@ pub enum VaultAction {
     Repay = 0x72,
 }
 
+impl Display for VaultAction {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.to_str())
+    }
+}
+
 impl VaultAction {
     pub fn to_protocol(&self) -> u8 {
         *self as u8
@@ -39,6 +45,16 @@ impl VaultAction {
             0x62 => Some(VaultAction::Borrow),
             0x72 => Some(VaultAction::Repay),
             _ => None,
+        }
+    }
+
+    pub fn to_str(&self) -> &str {
+        match self {
+            VaultAction::Open => "open",
+            VaultAction::Deposit => "deposit",
+            VaultAction::Withdraw => "withdraw",
+            VaultAction::Borrow => "borrow",
+            VaultAction::Repay => "repay",
         }
     }
 }
@@ -122,10 +138,6 @@ pub enum MissingVaultField {
     OraclePrice,
     #[error("oracle timestamp")]
     OracleTimestamp,
-    #[error("liquidation price")]
-    LiquidationPrice,
-    #[error("liquidation hash")]
-    LiquidationHash,
 }
 
 #[derive(Debug, Error, PartialEq)]

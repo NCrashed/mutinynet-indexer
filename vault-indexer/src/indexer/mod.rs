@@ -239,7 +239,10 @@ impl Indexer {
             cache.update_longest_chain(&headers)?;
             let mut conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
             cache.store(&mut conn)?;
-            info!("New headers height: {}", cache.get_current_height());
+            let current_height = cache.get_current_height();
+            let remote_height = self.remote_height.load(atomic::Ordering::Relaxed);
+            let progress = 100.0 * current_height as f64 / remote_height as f64;
+            info!("New headers height {}, progress: {:.03}%", current_height, progress);
         }
 
         if headers.len() == MAX_HEADERS_PER_MSG {
@@ -286,7 +289,7 @@ impl Indexer {
         max_scanned_height: &mut u32,
     ) -> Result<(), Error> {
         let hash = block.header.block_hash();
-        debug!("Got block: {}", hash);
+        trace!("Got block: {}", hash);
         self.process_block(block)?;
         *batch_left -= 1;
 
@@ -368,7 +371,8 @@ impl Indexer {
                     }
                 }
                 Ok(vtx) => {
-                    info!("Found a vault transaction: {:#?}", vtx);
+                    info!("New vault {} transaction: {}", vtx.action, vtx.txid);
+                    debug!("Found a vault transaction: {:#?}", vtx);
                 }
             }
         }
