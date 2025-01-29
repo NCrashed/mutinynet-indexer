@@ -1,5 +1,7 @@
 use clap::ValueEnum;
+use core::{fmt::Display, str::FromStr};
 use std::io::Cursor;
+use thiserror::Error;
 
 use bitcoin::{block::Header, consensus::Decodable, constants::genesis_block, p2p::Magic};
 
@@ -29,20 +31,48 @@ pub enum Network {
     Regtest,
 }
 
-impl ToString for Network {
-    fn to_string(&self) -> String {
-        match self {
-            Network::Bitcoin => "bitcoin".to_owned(),
-            Network::Testnet => "testnet".to_owned(),
-            Network::Testnet4 => "testnet4".to_owned(),
-            Network::Signet => "signet".to_owned(),
-            Network::Mutinynet => "mutinynet".to_owned(),
-            Network::Regtest => "regtest".to_owned(),
+impl Display for Network {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.to_str())
+    }
+}
+
+#[derive(Debug, Error)]
+#[error("Unknown network {0}")]
+pub struct NetworkFromStrErr(String);
+
+impl FromStr for Network {
+    type Err = NetworkFromStrErr;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_lowercase().as_str() {
+            "bitcoin" => Ok(Network::Bitcoin),
+            "testnet" => Ok(Network::Testnet),
+            "testnet4" => Ok(Network::Testnet4),
+            "signet" => Ok(Network::Signet),
+            "mutinynet" => Ok(Network::Mutinynet),
+            "regtest" => Ok(Network::Regtest),
+            _ => Err(NetworkFromStrErr(value.to_owned())),
         }
     }
 }
 
 impl Network {
+    /// Convert to human readable format. 
+    /// 
+    /// Property:
+    /// `from_str(v.to_str()) == v`
+    pub fn to_str(&self) -> &str {
+        match self {
+            Network::Bitcoin => "bitcoin",
+            Network::Testnet => "testnet",
+            Network::Testnet4 => "testnet4",
+            Network::Signet => "signet",
+            Network::Mutinynet => "mutinynet",
+            Network::Regtest => "regtest",
+        }
+    }
+
     /// Return the network magic bytes, which should be encoded little-endian
     /// at the start of every message
     ///

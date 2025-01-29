@@ -1,6 +1,8 @@
 use bitcoin::BlockHash;
 use thiserror::Error;
 
+use crate::Network;
+
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -32,4 +34,6 @@ pub enum Error {
     TipBlockHashWrongSize(Vec<u8>),
     #[error("Database doesn't have a metadata row!")]
     NoMetadata,
+    #[error("Database stored network {0} doesn't match the current network {1}. Recreate the database, please.")]
+    DatabaseNetworkMismatch(Network, Network),
 }

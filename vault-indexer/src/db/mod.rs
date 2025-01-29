@@ -55,6 +55,7 @@ pub fn initialize_db<P: AsRef<Path>>(
 
             CREATE TABLE IF NOT EXISTS metadata(
                 id INTEGER PRIMARY KEY CHECK (id = 0), -- The table has only one row
+                network TEXT NOT NULL,
                 tip_block_hash BLOB NOT NULL,
                 scanned_height INTEGER NOT NULL
             );
@@ -75,9 +76,15 @@ pub fn initialize_db<P: AsRef<Path>>(
     // Store initial metadata if missing
     if !connection.has_metadata()? {
         connection.store_metadata(&DbMetadata {
+            network,
             tip_block_hash: genesis.block_hash(),
             scanned_height: start_height,
         })?;
+    } else {
+        let db_network = connection.get_network()?;
+        if network != db_network {
+            return Err(Error::DatabaseNetworkMismatch(db_network, network));
+        }
     }
 
     Ok(connection)

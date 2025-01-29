@@ -1,15 +1,22 @@
+use crate::Network;
+
 use super::error::Error;
 use bitcoin::{hashes::Hash, BlockHash};
 use core::convert::TryInto;
 use rusqlite::{named_params, types::Type, Connection};
+use std::str::FromStr;
 
 #[derive(Debug, Clone)]
 pub struct DbMetadata {
+    pub network: Network,
     pub tip_block_hash: BlockHash,
     pub scanned_height: u32,
 }
 
 pub trait DatabaseMeta {
+    /// Get stored newtork type in the database
+    fn get_network(&self) -> Result<Network, Error>;
+
     /// Get current best main chain
     fn get_main_tip(&self) -> Result<BlockHash, Error>;
 
@@ -33,6 +40,11 @@ pub trait DatabaseMeta {
 }
 
 impl DatabaseMeta for Connection {
+    fn get_network(&self) -> Result<Network, Error> {
+        let meta = self.load_metada()?;
+        Ok(meta.network)
+    }
+
     fn get_main_tip(&self) -> Result<BlockHash, Error> {
         let meta = self.load_metada()?;
         Ok(meta.tip_block_hash)
@@ -75,14 +87,15 @@ impl DatabaseMeta for Connection {
 
     fn store_metadata(&self, meta: &DbMetadata) -> Result<(), Error> {
         let query = r#"
-            INSERT INTO metadata VALUES(0, :tip_block_hash, :scanned_height)
-                    ON CONFLICT(id) DO UPDATE SET 
+            INSERT INTO metadata VALUES(0, :network, :tip_block_hash, :scanned_height)
+                    ON CONFLICT(id) DO UPDATE SET
                         tip_block_hash=excluded.tip_block_hash, 
                         scanned_height=excluded.scanned_height
             "#;
         let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
         statement
             .execute(named_params! {
+                ":network": meta.network.to_str(),
                 ":tip_block_hash": &meta.tip_block_hash.as_raw_hash().as_byte_array()[..],
                 ":scanned_height": meta.scanned_height as i64,
             })
@@ -96,18 +109,23 @@ impl DatabaseMeta for Connection {
 
         let mut rows = statement
             .query_map([], |row| {
-                let tip_block_hash_bytes = row.get::<_, Vec<u8>>(1)?;
+                let network_str = row.get::<_, String>(1)?;
+                let network = Network::from_str(&network_str).map_err(|e|
+                    rusqlite::Error::FromSqlConversionFailure(1, Type::Text, Box::new(e)),
+                )?;
+                let tip_block_hash_bytes = row.get::<_, Vec<u8>>(2)?;
                 let tip_block_hash_sized =
                     tip_block_hash_bytes.clone().try_into().map_err(|_| {
                         rusqlite::Error::FromSqlConversionFailure(
-                            1,
+                            2,
                             Type::Blob,
                             Box::new(Error::TipBlockHashWrongSize(tip_block_hash_bytes)),
                         )
                     })?;
-                let scanned_height = row.get::<_, i64>(2)?;
+                let scanned_height = row.get::<_, i64>(3)?;
                 let tip_block_hash = BlockHash::from_byte_array(tip_block_hash_sized);
                 Ok(DbMetadata {
+                    network,
                     tip_block_hash,
                     scanned_height: scanned_height as u32,
                 })
