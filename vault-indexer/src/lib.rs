@@ -3,7 +3,7 @@
 mod cache;
 mod db;
 pub mod indexer;
-mod parser;
+mod vault;
 
 pub use indexer::*;
 

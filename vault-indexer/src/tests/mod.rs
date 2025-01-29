@@ -1,6 +1,6 @@
 mod db;
 mod framework;
-mod parser; 
+mod vault; 
 
 use framework::*;
 
