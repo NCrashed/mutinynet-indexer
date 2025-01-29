@@ -1,4 +1,4 @@
-use bitcoin::BlockHash;
+use bitcoin::{BlockHash, Txid};
 use thiserror::Error;
 
 use crate::Network;
@@ -32,8 +32,16 @@ pub enum Error {
     ShouldExecuteOneRow(String),
     #[error("Failed to parse tip block hash (expected 32 bytes): {0:x?}")]
     TipBlockHashWrongSize(Vec<u8>),
+    #[error("Failed to parse transaction hash (expected 32 bytes): {0:x?}")]
+    TxidWrongSize(Vec<u8>),
     #[error("Database doesn't have a metadata row!")]
     NoMetadata,
     #[error("Database stored network {0} doesn't match the current network {1}. Recreate the database, please.")]
     DatabaseNetworkMismatch(Network, Network),
+    #[error("Cannot encode bitcoin transaction: {0}")]
+    EncodeBitcoinTransaction(bitcoin::io::Error),
+    #[error("Vault transaction doesn't have inputs, txid: {0}")]
+    VaultTxNoInputs(Txid),
+    #[error("Cannot find vault for given transaction {0}")]
+    UnknownVaultTx(Txid),
 }

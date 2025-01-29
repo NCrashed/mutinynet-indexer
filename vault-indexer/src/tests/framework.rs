@@ -48,7 +48,7 @@ pub fn init_indexer() -> Arc<Indexer> {
 pub fn init_db() -> Connection {
     init_parser();
 
-    initialize_db(":memory:", Network::Mutinynet, 0).expect("Database created")
+    initialize_db(":memory:", Network::Mutinynet, 0, false).expect("Database created")
 }
 
 /// Helper that polls the function for `count` times and waits for `delay` between calls.

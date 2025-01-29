@@ -28,7 +28,7 @@ use node::{node_worker, MAX_HEADERS_PER_MSG};
 
 use crate::{
     cache::headers::HeadersCache,
-    db::{self, initialize_db, metadata::DatabaseMeta},
+    db::{self, initialize_db, metadata::DatabaseMeta, vault::DatabaseVault},
     vault::VaultTx,
 };
 
@@ -250,11 +250,15 @@ impl Indexer {
             let mut remote_height = self.remote_height.load(atomic::Ordering::Relaxed);
             // Avoid messages that we synced over 100% (remote height is set on the handshake time)
             if current_height > remote_height {
-                self.remote_height.store(current_height, atomic::Ordering::Relaxed);
+                self.remote_height
+                    .store(current_height, atomic::Ordering::Relaxed);
                 remote_height = current_height;
             }
             let progress = 100.0 * current_height as f64 / remote_height as f64;
-            info!("New headers height {}, progress: {:.03}%", current_height, progress);
+            info!(
+                "New headers height {}, progress: {:.03}%",
+                current_height, progress
+            );
         }
 
         if headers.len() == MAX_HEADERS_PER_MSG {
@@ -269,7 +273,7 @@ impl Indexer {
             events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
                 headers_msg,
             )))?
-        } else {
+        } else if *batch_left <= 0 {
             // Request blocks to scan
             let cache = self
                 .headers_cache
@@ -284,7 +288,7 @@ impl Indexer {
             let msg: NetworkMessage = cache.make_get_blocks(scanned_height, self.batch_size)?;
             events_sender.send(Event::OutcomingMessage(msg))?;
             // Remember how much blocks we expect
-            let actual_batch = self.batch_size.min(height - scanned_height + 1);
+            let actual_batch = self.batch_size.min(height - scanned_height);
             debug!("Request {} blocks", actual_batch);
             *batch_left += actual_batch as i64;
         }
@@ -300,40 +304,47 @@ impl Indexer {
         batch_left: &mut i64,
         max_scanned_height: &mut u32,
     ) -> Result<(), Error> {
-        let hash = block.header.block_hash();
-        trace!("Got block: {}", hash);
-        self.process_block(block)?;
+        trace!("Current batch size: {}", *batch_left);
+        let hash = block.block_hash();
+        let height = {
+            let cache = self
+                .headers_cache
+                .lock()
+                .map_err(|_| Error::HeadersCacheLock)?;
+            cache.get_header(hash)?.height
+        };
+
+        debug!("Got block: {}", hash);
+        self.process_block(block, height)?;
         *batch_left -= 1;
 
-        let cache = self
-            .headers_cache
-            .lock()
-            .map_err(|_| Error::HeadersCacheLock)?;
         // Remember max height we scanned
-        let scanned_height = {
-            let record = cache.get_header(hash)?;
-            (*max_scanned_height).max(record.height)
-        };
+        let scanned_height = (*max_scanned_height).max(height);
         *max_scanned_height = scanned_height;
         // Scanned all blocks from batch, request next one
         trace!("Batch left: {}", batch_left);
         if *batch_left <= 0 {
             // Display progress
-            let height = cache.get_current_height();
-            let scanned_part = 100.0 * scanned_height as f64 / height as f64;
+            let cache = self
+                .headers_cache
+                .lock()
+                .map_err(|_| Error::HeadersCacheLock)?;
+            let current_height = cache.get_current_height();
+            let scanned_part = 100.0 * scanned_height as f64 / current_height as f64;
             info!(
                 "Scanned {}/{} {:.03}%",
-                scanned_height, height, scanned_part
+                scanned_height, current_height, scanned_part
             );
 
             // Store how much we scanned
             let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
             conn.set_scanned_height(scanned_height)?;
 
-            if scanned_height < height {
-                let msg: NetworkMessage = cache.make_get_blocks(scanned_height, self.batch_size)?;
+            if scanned_height < current_height {
+                let msg: NetworkMessage =
+                    cache.make_get_blocks(scanned_height + 1, self.batch_size)?;
                 events_sender.send(Event::OutcomingMessage(msg))?;
-                let actual_batch = self.batch_size.min(height - scanned_height + 1);
+                let actual_batch = self.batch_size.min(current_height - scanned_height);
                 debug!("Request {} blocks", actual_batch);
                 *batch_left += actual_batch as i64;
             }
@@ -373,7 +384,8 @@ impl Indexer {
 
     /// Iterate over transactions in the block and parse them. Stores the found vault
     /// transactions in database.
-    fn process_block(&self, block: Block) -> Result<(), Error> {
+    fn process_block(&self, block: Block, height: u32) -> Result<(), Error> {
+        let block_hash = block.block_hash();
         for tx in block.txdata {
             match VaultTx::from_tx(&tx) {
                 Err(err) => {
@@ -385,6 +397,9 @@ impl Indexer {
                 Ok(vtx) => {
                     info!("New vault {} transaction: {}", vtx.action, vtx.txid);
                     debug!("Found a vault transaction: {:#?}", vtx);
+
+                    let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+                    conn.store_vault_tx(&vtx, block_hash, height, &tx)?;
                 }
             }
         }
@@ -456,12 +471,13 @@ impl IndexerBuilder {
         self.rescan_builder = Box::new(move || flag);
         self
     }
-    
+
     pub fn build(self) -> Result<Indexer, Error> {
         let start_height = (self.start_height_builder)();
         let db_path = (self.db_path_builder)();
         let network = (self.network_builder)();
-        let database = initialize_db(&db_path, network, start_height)?;
+        let rescan = (self.rescan_builder)();
+        let database = initialize_db(&db_path, network, start_height, rescan)?;
         let headers_cache = HeadersCache::load(&database)?;
         Ok(Indexer {
             network,
@@ -472,7 +488,7 @@ impl IndexerBuilder {
             headers_cache: Arc::new(Mutex::new(headers_cache)),
             batch_size: (self.batch_size_builder)(),
             remote_height: Arc::new(AtomicU32::new(0)),
-            rescan: (self.rescan_builder)(),
+            rescan,
         })
     }
 }

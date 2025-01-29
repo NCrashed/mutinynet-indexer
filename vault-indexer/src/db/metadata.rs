@@ -110,9 +110,9 @@ impl DatabaseMeta for Connection {
         let mut rows = statement
             .query_map([], |row| {
                 let network_str = row.get::<_, String>(1)?;
-                let network = Network::from_str(&network_str).map_err(|e|
-                    rusqlite::Error::FromSqlConversionFailure(1, Type::Text, Box::new(e)),
-                )?;
+                let network = Network::from_str(&network_str).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(1, Type::Text, Box::new(e))
+                })?;
                 let tip_block_hash_bytes = row.get::<_, Vec<u8>>(2)?;
                 let tip_block_hash_sized =
                     tip_block_hash_bytes.clone().try_into().map_err(|_| {

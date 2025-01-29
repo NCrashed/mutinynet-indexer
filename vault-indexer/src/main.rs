@@ -28,7 +28,7 @@ struct Args {
     #[arg(short, long, default_value_t = 1527651)]
     start_height: u32,
 
-    /// Start scanning blocks from begining (--start-height), doesn't 
+    /// Start scanning blocks from begining (--start-height), doesn't
     /// redownload headers.
     #[arg(long)]
     rescan: bool,

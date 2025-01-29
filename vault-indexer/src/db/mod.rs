@@ -1,7 +1,9 @@
 pub mod error;
 pub mod header;
 pub mod metadata;
+pub mod vault;
 
+use crate::db::vault::DatabaseVault;
 use crate::Network;
 pub use error::Error;
 pub use header::*;
@@ -14,6 +16,7 @@ pub fn initialize_db<P: AsRef<Path>>(
     filename: P,
     network: Network,
     start_height: u32,
+    rescan: bool,
 ) -> Result<Connection, Error> {
     trace!("Opening database {:?}", filename.as_ref());
     let mut connection = if filename.as_ref().to_str() == Some(":memory:") {
@@ -61,21 +64,19 @@ pub fn initialize_db<P: AsRef<Path>>(
             );
 
             CREATE TABLE IF NOT EXISTS vaults(
-                open_txid           BLOB(32) NOT NULL,
+                open_txid           BLOB(32) NOT NULL PRIMARY KEY, -- Assume that we cannot have two vaults operations in single tx
                 output              INTEGER NOT NULL,
                 balance             INTEGER NOT NULL,
                 oracle_price        INTEGER NOT NULL,
                 oracle_timestamp    INTEGER NOT NULL,
                 liquidation_price   INTEGER,
-                liquidation_hash    BLOB(32),
-                PRIMARY KEY (open_txid, output) -- Actually I don't sure if two vault can be created within one tx
+                liquidation_hash    BLOB(32)
             );
 
             CREATE TABLE IF NOT EXISTS transactions(
-                txid                BLOB(32) NOT NULL,
+                txid                BLOB(32) NOT NULL PRIMARY KEY, -- Assume that we cannot have two vaults operations in single tx
                 output              INTEGER NOT NULL,
                 vault_txid          BLOB(32) NOT NULL,
-                vault_output        INTEGER NOT NULL,
                 -- Fields extracted from transaction
                 version             TEXT NOT NULL,
                 action              TEXT NOT NULL,
@@ -90,12 +91,11 @@ pub fn initialize_db<P: AsRef<Path>>(
                 in_longest          INTEGER NOT NULL,
                 raw_tx              BLOB NOT NULL,
 
-                PRIMARY KEY (txid, output),
-                FOREIGN KEY (vault_txid, vault_output) REFERENCES vaults(open_txid, output),
+                FOREIGN KEY (vault_txid) REFERENCES vaults(open_txid),
                 FOREIGN KEY (block_hash) REFERENCES headers(block_hash)
             );
 
-            CREATE INDEX IF NOT EXISTS idx_transactions_vault_id ON transactions(vault_txid, vault_output);
+            CREATE INDEX IF NOT EXISTS idx_transactions_vault_id ON transactions(vault_txid);
             CREATE INDEX IF NOT EXISTS idx_transactions_action ON transactions(action);
             CREATE INDEX IF NOT EXISTS idx_transactions_height ON transactions(height);
             CREATE INDEX IF NOT EXISTS idx_transactions_height_in_longest ON transactions(height, in_longest);
@@ -127,6 +127,11 @@ pub fn initialize_db<P: AsRef<Path>>(
         if network != db_network {
             return Err(Error::DatabaseNetworkMismatch(db_network, network));
         }
+    }
+
+    if rescan {
+        connection.drop_vaults()?;
+        connection.set_scanned_height(start_height)?;
     }
 
     Ok(connection)

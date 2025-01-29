@@ -58,8 +58,8 @@ impl FromStr for Network {
 }
 
 impl Network {
-    /// Convert to human readable format. 
-    /// 
+    /// Convert to human readable format.
+    ///
     /// Property:
     /// `from_str(v.to_str()) == v`
     pub fn to_str(&self) -> &str {

@@ -7,7 +7,7 @@ use core::{assert_eq, fmt::Display, matches};
 use log::*;
 use std::io::Cursor;
 
-pub use bitcoin::Wtxid;
+pub use bitcoin::Txid;
 use thiserror::Error;
 
 /// Action inside the vault tx
@@ -106,7 +106,7 @@ pub type LiquidationHash = [u8; LIQUIDATION_HASH_LEN];
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VaultTx {
     /// Hash of transaction where we found the vault tx
-    pub txid: Wtxid,
+    pub txid: Txid,
     /// The output number with the op_return
     pub output: u32,
     /// Version of the transaction
@@ -285,7 +285,7 @@ impl VaultTx {
         let liquidation_hash = instructions.next20();
 
         Ok(VaultTx {
-            txid: tx.compute_wtxid(),
+            txid: tx.compute_txid(),
             output: out_i as u32,
             version: match version {
                 VaultVersion::Vault1 if !is_new_format => VaultVersion::Vault1Legacy,
