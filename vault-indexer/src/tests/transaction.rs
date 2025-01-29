@@ -38,11 +38,15 @@ fn parse_other_opreturn() {
     init_parser();
 
     let tx_bytes = hex::decode(OTHER_OPRETURN_TX).unwrap();
-    let parsed = VaultTx::from_bytes(&tx_bytes);
-    assert_eq!(
-        parsed,
-        Err(ParseError::NotVaultTx(NotVaultReason::WrongVersion(VaultVersion::Unknown(0))))
-    );
+    let result = VaultTx::from_bytes(&tx_bytes);
+    if let Err(ParseError::NotVaultTx(reason)) = result {
+        assert_eq!(
+            reason,
+            NotVaultReason::WrongVersion(36)
+        );
+    } else {
+        panic!("Expected error at parsing: {result:?}");
+    };
 }
 
 #[test]
@@ -51,11 +55,12 @@ fn parse_other_unrelated() {
     init_parser();
 
     let tx_bytes = hex::decode(OTHER_UNRELATED_TX).unwrap();
-    let parsed = VaultTx::from_bytes(&tx_bytes);
-    assert_eq!(
-        parsed,
-        Err(ParseError::NotVaultTx(NotVaultReason::NoOpReturn))
-    );
+    let result = VaultTx::from_bytes(&tx_bytes);
+    if let Err(ParseError::NotVaultTx(reason)) = result {
+        assert_eq!(reason, NotVaultReason::NoOpReturn);
+    } else {
+        panic!("Expected error at parsing: {result:?}");
+    };
 }
 
 #[test]

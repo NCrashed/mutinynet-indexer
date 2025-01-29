@@ -1,21 +1,48 @@
-use core::{fmt::Display, unimplemented};
+use bitcoin::{consensus::Decodable, opcodes::all::{OP_PUSHBYTES_14, OP_PUSHBYTES_8, OP_PUSHNUM_8, OP_RETURN}, Script, Transaction};
+use core::{assert_eq, fmt::Display};
+use log::*;
+use std::io::Cursor;
 
 pub use bitcoin::Wtxid;
 use thiserror::Error;
 
 /// Action inside the vault tx
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
 pub enum VaultAction {
     // Open new vault
-    Open,
+    Open = 0x64,
     // Deposit BTC
-    Deposit, 
+    Deposit,
     // Withdraw BTC
     Withdraw,
     // Borrow UNIT
-    Borrow, 
+    Borrow,
     // Repay UNIT
     Repay,
+}
+
+impl VaultAction {
+    pub fn to_protocol(&self) -> u8 {
+        match self {
+            VaultAction::Open => 0x64,
+            VaultAction::Deposit => 1,
+            VaultAction::Withdraw => 2,
+            VaultAction::Borrow => 3,
+            VaultAction::Repay => 4,
+        }
+    }
+
+    pub fn from_protocol(v: u8) -> Option<Self> {
+        match v {
+            0x64 => Some(VaultAction::Open),
+            1 => Some(VaultAction::Deposit),
+            2 => Some(VaultAction::Withdraw),
+            3 => Some(VaultAction::Borrow),
+            4 => Some(VaultAction::Repay),
+            _ => None,
+        }
+    }
 }
 
 /// Known versions of vault transaction
@@ -23,21 +50,19 @@ pub enum VaultAction {
 #[repr(u8)]
 pub enum VaultVersion {
     Vault1_0 = 1,
-    Unknown(u8),
 }
 
 impl VaultVersion {
     pub fn to_protocol(&self) -> u8 {
         match self {
-            VaultVersion::Vault1_0 => 1, 
-            VaultVersion::Unknown(v) => *v,
+            VaultVersion::Vault1_0 => 1,
         }
     }
 
-    pub fn from_protocol(v: u8) -> Self {
+    pub fn from_protocol(v: u8) -> Option<Self> {
         match v {
-            1 => VaultVersion::Vault1_0,
-            _ => VaultVersion::Unknown(v),
+            1 => Some(VaultVersion::Vault1_0),
+            _ => None,
         }
     }
 }
@@ -57,14 +82,14 @@ pub type OraclePrice = u32;
 /// Liquidation hash stored in byte array
 pub type LiquidationHash = [u8; 32];
 
-/// Contains metadata about the vault transaction 
+/// Contains metadata about the vault transaction
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VaultTx {
     /// Hash of transaction where we found the vault tx
     pub txid: Wtxid,
     /// The output number with the op_return
     pub output: u32,
-    /// Version of the transaction 
+    /// Version of the transaction
     pub version: VaultVersion,
     /// The encoded action
     pub action: VaultAction,
@@ -80,16 +105,49 @@ pub struct VaultTx {
     pub liquidation_hash: LiquidationHash,
 }
 
+/// Fields that we expect in the op_return payload
 #[derive(Debug, Error, PartialEq)]
-pub enum NotVaultReason {
-    #[error("Not expected version {0}")]
-    WrongVersion(VaultVersion),
-    #[error("No op_return output detected")]
-    NoOpReturn,
+pub enum MissingVaultField {
+    #[error("version")]
+    Version,
+    #[error("action")]
+    Action,
+    #[error("balance")]
+    Balance,
+    #[error("oracle price")]
+    OraclePrice,
+    #[error("oracle timestamp")]
+    OracleTimestamp,
+    #[error("liquidation price")]
+    LiquidationPrice,
+    #[error("liquidation hash")]
+    LiquidationHash,
 }
 
 #[derive(Debug, Error, PartialEq)]
+pub enum NotVaultReason {
+    #[error("No OP_RETURN output detected")]
+    NoOpReturn,
+    #[error("No OP_PUSHNUM_8 after OP_RETURN")]
+    NoOpPush8,
+    #[error("Expected OP_PUSHNUM_8 but got opcode {0}")]
+    MismatchOpPush8(u8), 
+    #[error("No OP_PUSHBYTES_14 after OP_RETURN")]
+    NoOpPushbytes14,
+    #[error("Expected OP_PUSHBYTES_14 but got opcode {0}")]
+    MismatchOpPushbytes14(u8), 
+    #[error("Missing {0} field")]
+    MissingField(MissingVaultField),
+    #[error("Not expected version {0}")]
+    WrongVersion(u8),
+    #[error("Not expected action {0}")]
+    WrongAction(u8),
+}
+
+#[derive(Debug, Error)]
 pub enum ParseError {
+    #[error("Cannot decode Bitcoin transaction: {0}")]
+    InvalidParentTx(#[from] bitcoin::consensus::encode::Error),
     #[error("Transaction is not Vault tx: {0}")]
     NotVaultTx(NotVaultReason),
 }
@@ -97,6 +155,125 @@ pub enum ParseError {
 impl VaultTx {
     /// Detect and parse the vault transaction from the given bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, ParseError> {
-        unimplemented!()
+        // Decode vessel bitcoin transaction
+        let tx: Transaction = Transaction::consensus_decode(&mut Cursor::new(bytes))?;
+        // Find first op_return
+        let (out_i, op_return_out): (usize, &Script) = tx
+            .output
+            .iter()
+            .enumerate()
+            .map(|(i, out)| (i, out.script_pubkey.as_script()))
+            .find(|(_, out)| out.is_op_return())
+            .ok_or(ParseError::NotVaultTx(NotVaultReason::NoOpReturn))?;
+
+        // Now let parse instructions one by one
+        let mut instructions = op_return_out.bytes();
+        // Skip op_return
+        let op_return: u8 = instructions
+            .next()
+            .ok_or(ParseError::NotVaultTx(NotVaultReason::NoOpReturn))?;
+        assert_eq!(op_return, OP_RETURN.to_u8()); // if fires, the is_op_return fn is a lyier
+
+        // Skip OP_PUSHNUM_8
+        let op_pushnum_8: u8 = instructions
+            .next()
+            .ok_or(ParseError::NotVaultTx(NotVaultReason::NoOpPush8))?;
+        if op_pushnum_8 != OP_PUSHNUM_8.to_u8() {
+            return Err(ParseError::NotVaultTx(NotVaultReason::MismatchOpPush8(op_pushnum_8)))
+        }
+
+        // Skip op_push14
+        let op_pushbytes_14: u8 = instructions
+            .next()
+            .ok_or(ParseError::NotVaultTx(NotVaultReason::NoOpPushbytes14))?;
+        if op_pushbytes_14 != OP_PUSHBYTES_14.to_u8() {
+            return Err(ParseError::NotVaultTx(NotVaultReason::MismatchOpPushbytes14(op_pushbytes_14)))
+        }
+
+        // Parse version field
+        let version_code: u8 =
+            instructions
+                .next()
+                .ok_or(ParseError::NotVaultTx(NotVaultReason::MissingField(
+                    MissingVaultField::Version,
+                )))?;
+        let version = VaultVersion::from_protocol(version_code).ok_or(ParseError::NotVaultTx(
+            NotVaultReason::WrongVersion(version_code),
+        ))?;
+
+        // Parse action field
+        let action_code: u8 =
+            instructions
+                .next()
+                .ok_or(ParseError::NotVaultTx(NotVaultReason::MissingField(
+                    MissingVaultField::Action,
+                )))?;
+        let action = VaultAction::from_protocol(action_code).ok_or(ParseError::NotVaultTx(
+            NotVaultReason::WrongAction(action_code),
+        ))?;
+
+        // Fetch units balance
+        let balance = instructions.next_u32_be().ok_or(ParseError::NotVaultTx(
+            NotVaultReason::MissingField(MissingVaultField::Balance),
+        ))?;
+        // Fetch oracle price
+        let oracle_price = instructions.next_u32_be().ok_or(ParseError::NotVaultTx(
+            NotVaultReason::MissingField(MissingVaultField::OraclePrice),
+        ))?;
+        // Fetch oracle timestamp
+        let oracle_timestamp = instructions.next_u32_be().ok_or(ParseError::NotVaultTx(
+            NotVaultReason::MissingField(MissingVaultField::OracleTimestamp),
+        ))?;
+        // Fetch liqudation price
+        let liquidation_price = instructions.next_u32_be().ok_or(ParseError::NotVaultTx(
+            NotVaultReason::MissingField(MissingVaultField::LiquidationPrice),
+        ))?;
+        // Take remaining bytes as hash
+        let liquidation_hash =
+            instructions
+                .next32()
+                .ok_or(ParseError::NotVaultTx(NotVaultReason::MissingField(
+                    MissingVaultField::LiquidationHash,
+                )))?;
+
+        Ok(VaultTx {
+            txid: tx.compute_wtxid(),
+            output: out_i as u32,
+            version,
+            action,
+            balance,
+            oracle_price,
+            oracle_timestamp,
+            liquidation_price,
+            liquidation_hash,
+        })
+    }
+}
+
+trait BytesParser {
+    fn next4(&mut self) -> Option<[u8; 4]>;
+
+    fn next32(&mut self) -> Option<[u8; 32]>;
+
+    fn next_u32_be(&mut self) -> Option<u32> {
+        self.next4().map(|bytes| u32::from_be_bytes(bytes))
+    }
+}
+
+impl<T: Iterator<Item = u8>> BytesParser for T {
+    fn next4(&mut self) -> Option<[u8; 4]> {
+        let mut buf = [0u8; 4];
+        for i in 0..4 {
+            buf[i] = self.next()?;
+        }
+        Some(buf)
+    }
+
+    fn next32(&mut self) -> Option<[u8; 32]> {
+        let mut buf = [0u8; 32];
+        for i in 0..32 {
+            buf[i] = self.next()?;
+        }
+        Some(buf)
     }
 }
