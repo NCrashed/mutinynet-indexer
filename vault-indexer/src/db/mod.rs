@@ -2,6 +2,7 @@ pub mod error;
 pub mod header;
 pub mod metadata;
 pub mod vault;
+pub mod loaders; 
 
 use crate::db::vault::DatabaseVault;
 use crate::Network;

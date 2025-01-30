@@ -34,6 +34,8 @@ pub enum Error {
     TipBlockHashWrongSize(Vec<u8>),
     #[error("Failed to parse transaction hash (expected 32 bytes): {0:x?}")]
     TxidWrongSize(Vec<u8>),
+    #[error("Failed to decode fixed sized (len {0}) array from the vector: {1:x?}")]
+    ArrayWrongSize(usize, Vec<u8>),
     #[error("Database doesn't have a metadata row!")]
     NoMetadata,
     #[error("Database stored network {0} doesn't match the current network {1}. Recreate the database, please.")]

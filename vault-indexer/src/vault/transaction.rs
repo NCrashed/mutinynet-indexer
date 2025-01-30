@@ -3,7 +3,7 @@ use bitcoin::{
     opcodes::all::{OP_PUSHBYTES_14, OP_PUSHBYTES_38, OP_PUSHNUM_8, OP_RETURN},
     Script, Transaction,
 };
-use core::{assert_eq, fmt::Display, matches};
+use core::{assert_eq, fmt::Display, matches, str::FromStr};
 use log::*;
 use std::io::Cursor;
 
@@ -29,6 +29,25 @@ pub enum VaultAction {
 impl Display for VaultAction {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.to_str())
+    }
+}
+
+#[derive(Debug, Clone, Error)]
+#[error("Unknown vault action {0}")]
+pub struct UnknownVaultActionStr(String);
+
+impl FromStr for VaultAction {
+    type Err = UnknownVaultActionStr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "open" => Ok(VaultAction::Open),
+            "deposit" => Ok(VaultAction::Deposit),
+            "withdraw" => Ok(VaultAction::Withdraw),
+            "borrow" => Ok(VaultAction::Borrow),
+            "repay" => Ok(VaultAction::Repay),
+            _ => Err(UnknownVaultActionStr(s.to_owned())),
+        }
     }
 }
 
@@ -82,11 +101,34 @@ impl VaultVersion {
             _ => None,
         }
     }
+
+    pub fn to_str(&self) -> &str {
+        match self {
+            VaultVersion::Vault1Legacy => "1_legacy",
+            VaultVersion::Vault1 => "1",
+        }
+    }
 }
 
 impl Display for VaultVersion {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.to_protocol())
+        write!(f, "{}", self.to_str())
+    }
+}
+
+#[derive(Debug, Clone, Error)]
+#[error("Unknown vault protocol version {0}")]
+pub struct UnknownVaultVersionStr(String);
+
+impl FromStr for VaultVersion {
+    type Err = UnknownVaultVersionStr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "1_legacy" => Ok(VaultVersion::Vault1Legacy),
+            "1" => Ok(VaultVersion::Vault1),
+            _ => Err(UnknownVaultVersionStr(s.to_owned())),
+        }
     }
 }
 

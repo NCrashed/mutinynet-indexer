@@ -11,6 +11,8 @@ in stdenv.mkDerivation rec {
     rustup
     sqlite
     openssl
+    websocat
+    rlwrap
   ];
   shellHook = ''
     export OPENSSL_DIR="${merged-openssl}" 

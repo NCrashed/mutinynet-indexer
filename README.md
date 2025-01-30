@@ -12,7 +12,48 @@ The step is optional, you can use any Mutinynet node (for instance the official 
 ./start-signet
 ```
 
+### Start the indexer 
+
+The simpliest form of running the indexer is using the script below. Nix will fetch Rust toolchain and build the indexer from source. The configuration targets the local node on the Mutiny Signet.
+
+``` bash 
+./run-indexer
+```
+
+You can restart scanning with:
+``` bash
+./run-indexer --rescan
+```
+
+Or, you can connect to the external public Mutiny node:
+```bash
+./run-public
+```
+
+### Test WebSocket service 
+
+The websocket service is started on the `ws://127.0.0.1:39987` by default. You can adjust this with command line arguments, see `./run-indexer --help`. 
+
+To test the endpoints one can use `./run-client` script that uses [websocat]() to connect to the local indexer on the default port. You should type calls in the format `{"method": "range_history_all"}`. The available methods are listed bellow:
+* `range_history_all`: Return all vault-related transactions within a specified time range (optional start and end timestamps). Example: 
+```json
+{"method": "range_history_all", "timestamp_start": 1738113524, "timestamp_end": 1738225126 }
+```
+* `vault_history_tx`: Return all transactions for a given vault within a specified time range.
+* `action_history`: Return aggregated action data over specified time spans (e.g., daily, weekly).
+* `overall_volume`: Return aggregated volume metrics (BTC and units) over a specified time span.
+
+
 ## Repo structure
+
+- `src/cache` - contains in-memory cache for Bitcoin headers chains and algorithms for fork detection, chain reorganization.
+- `src/db` - contains all SQlite related actions, schemas and queries.
+- `src/indexer/mod.rs` - contains user API and blockchain traversal logic.
+- `src/indexer/node.rs` - contains logic to control TCP connection to other nodes.
+- `src/tests` - contains integration and unit tests. 
+- `src/vault` - contains domain types for Vault transactions and parser from hosted Bitcoin transactions.
+- `src/service.rs` - contains WebSocket service that is decoupled from the indexer.
+- `src/main.rs` - collects all components in one place using the indexer and the WebSocket service as libraries.
 
 - `nix` - contains all [Nix](nixos.org) configurations required to reproducibly build this repository and the Mutiny full node.
     * `bitcoind-mutiny.nix` - Nix derivation for [Mutiny fork](https://github.com/benthecarman/bitcoin/releases) of Bitcoin Core.
@@ -24,3 +65,7 @@ The step is optional, you can use any Mutinynet node (for instance the official 
 - `rust-toolchain.toml` - Pins the Rust toolchain for reproducible builds.
 - `shell.nix` - Contains a developing and testing environments that includes the Rust toolchain and Mutiny node.
 - `start-signet` - Launches the local Mutiny node for testing.
+- `run-client` - Launches the Websocket client for testing.
+- `run-indexer` - Launches the local indexer from sources that targets local Mutiny node.
+- `run-public` - Launches the local indexer from sources that targets public Mutiny node.
+

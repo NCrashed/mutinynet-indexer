@@ -1,3 +1,4 @@
+use crate::db::vault::advance::DatabaseVaultAdvance;
 use crate::vault::{OraclePrice, UnitAmount, VaultId, VaultTx};
 use crate::Network;
 use crate::{indexer::event::Event, Indexer};
@@ -28,8 +29,12 @@ pub enum Error {
     EncodingMessage(#[from] serde_json::Error),
     #[error("Cannot parse transaction hash {0}, reason: {1}")]
     ValidateTxid(String, HexToArrayError),
+    #[error("Database error: {0}")]
+    Database(#[from] crate::db::error::Error),
     #[error("Failed to send message to queue")]
     SendingBus,
+    #[error("Failed to get lock on database")]
+    DbLock,
 }
 
 /// Starts a background thread that implements websocket service for indexer
@@ -108,6 +113,7 @@ pub enum Request {
 
 #[derive(Serialize)]
 pub enum Response {
+    AllHistory(Vec<VaultTxInfo>),
     Dummy,
 }
 
@@ -237,7 +243,7 @@ fn client_handler(
                     Ok(request) => request,
                 };
                 trace!("Client {addr} request: {request:?}");
-                let response = match process_request(request, database.clone()) {
+                let response = match process_request(network, request, database.clone()) {
                     Err(e) => {
                         error!("Failed to process client {addr} request: {e}");
                         let err_msg = serde_json::to_string(&ClientError {
@@ -276,12 +282,16 @@ fn client_handler(
     Ok(())
 }
 
-fn process_request(request: Request, database: Arc<Mutex<Connection>>) -> Result<Response, Error> {
+fn process_request(
+    network: Network,
+    request: Request,
+    database: Arc<Mutex<Connection>>,
+) -> Result<Response, Error> {
     match request {
         Request::AllHistory {
             timestamp_start,
             timestamp_end,
-        } => handler_all_history(database, timestamp_start, timestamp_end),
+        } => handler_all_history(network, database, timestamp_start, timestamp_end),
         Request::VaultHistory {
             vault_open_txid,
             timestamp_start,
@@ -303,11 +313,26 @@ fn process_request(request: Request, database: Arc<Mutex<Connection>>) -> Result
 }
 
 fn handler_all_history(
+    network: Network,
     database: Arc<Mutex<Connection>>,
     timestamp_start: Option<u32>,
     timestamp_end: Option<u32>,
 ) -> Result<Response, Error> {
-    Ok(Response::Dummy)
+    let conn = database.lock().map_err(|_| Error::DbLock)?;
+    let metas = conn.range_history_all(timestamp_start, timestamp_end)?;
+    let infos = metas
+        .into_iter()
+        .map(|meta| {
+            VaultTxInfo::new(
+                network,
+                meta.vault_id,
+                &meta.vault_tx,
+                meta.block_hash,
+                meta.height,
+            )
+        })
+        .collect();
+    Ok(Response::AllHistory(infos))
 }
 
 fn handler_vault_history(

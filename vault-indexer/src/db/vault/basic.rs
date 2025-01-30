@@ -1,13 +1,13 @@
 use std::io::Cursor;
 
 use bitcoin::consensus::Encodable;
-use bitcoin::hashes::Hash;
 use bitcoin::{BlockHash, Txid};
 use log::trace;
-use rusqlite::{named_params, types::Type, Connection, Row};
+use rusqlite::{named_params, Connection};
 
-use super::error::Error;
+use super::super::error::Error;
 use crate::vault::{VaultAction, VaultId, VaultTx};
+use super::super::loaders::*;
 
 /// Operations with vault in database
 pub trait DatabaseVault {
@@ -54,8 +54,8 @@ impl DatabaseVault for Connection {
         "#;
         let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
         let mut rows = statement
-            .query_map(named_params! {":txid": txid_to_sql(&txid)}, |row| {
-                let vault_txid = get_txid(row, 0)?;
+            .query_map(named_params! {":txid": (&txid).field_encode()}, |row| {
+                let vault_txid = row.field_decode(0)?;
                 Ok(vault_txid)
             })
             .map_err(Error::ExecuteQuery)?;
@@ -112,9 +112,9 @@ fn insert_vault_tx_raw(
     let mut statement = conn.prepare_cached(query).map_err(Error::PrepareQuery)?;
     statement
         .execute(named_params! {
-            ":txid": txid_to_sql(&tx.txid),
+            ":txid": (&tx.txid).field_encode(),
             ":output": tx.output as i64,
-            ":vault_txid": txid_to_sql(&vault_id),
+            ":vault_txid": (&vault_id).field_encode(),
             ":version": tx.version.to_string(),
             ":action": tx.action.to_string(),
             ":balance": tx.balance as i64,
@@ -122,7 +122,7 @@ fn insert_vault_tx_raw(
             ":oracle_timestamp": tx.oracle_timestamp as i64,
             ":liquidation_price": tx.liquidation_price,
             ":liquidation_hash": tx.liquidation_hash,
-            ":block_hash": block_hash_to_sql(&block_hash),
+            ":block_hash": (&block_hash).field_encode(),
             ":height": height as i64,
             ":in_longest": 1, // assume that we don't scan forks
             ":raw_tx": tx_bytes,
@@ -153,7 +153,7 @@ fn create_vault(conn: &Connection, tx: &VaultTx) -> Result<(), Error> {
     let mut statement = conn.prepare_cached(query).map_err(Error::PrepareQuery)?;
     statement
         .execute(named_params! {
-            ":open_txid": txid_to_sql(&tx.txid),
+            ":open_txid": (&tx.txid).field_encode(),
             ":output": tx.output as i64,
             ":balance": tx.balance as i64,
             ":oracle_price": tx.oracle_price as i64,
@@ -184,7 +184,7 @@ fn update_vault(conn: &Connection, tx: &VaultTx) -> Result<(), Error> {
     let mut statement = conn.prepare_cached(query).map_err(Error::PrepareQuery)?;
     statement
         .execute(named_params! {
-            ":vault_id": txid_to_sql(&tx.txid),
+            ":vault_id": (&tx.txid).field_encode(),
             ":balance": tx.balance as i64,
             ":oracle_price": tx.oracle_price as i64,
             ":oracle_timestamp": tx.oracle_timestamp as i64,
@@ -215,25 +215,4 @@ fn find_parent_vault(
             .ok_or(Error::UnknownVaultTx(vtx.txid))?;
         Ok(vault_id)
     }
-}
-
-// Helper that extracts txid from blob in row
-fn get_txid(row: &Row<'_>, index: usize) -> Result<Txid, rusqlite::Error> {
-    let txid_bytes = row.get::<_, Vec<u8>>(index)?;
-    let txid_bytes_sized = txid_bytes.clone().try_into().map_err(|_| {
-        rusqlite::Error::FromSqlConversionFailure(
-            index,
-            Type::Blob,
-            Box::new(Error::TxidWrongSize(txid_bytes)),
-        )
-    })?;
-    Ok(Txid::from_byte_array(txid_bytes_sized))
-}
-
-fn txid_to_sql(txid: &Txid) -> &[u8] {
-    &txid.as_raw_hash().as_byte_array()[..]
-}
-
-fn block_hash_to_sql(hash: &BlockHash) -> &[u8] {
-    &hash.as_raw_hash().as_byte_array()[..]
 }
