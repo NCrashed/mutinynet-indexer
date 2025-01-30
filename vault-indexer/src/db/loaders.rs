@@ -112,6 +112,14 @@ impl<'a> FieldEncode for &'a BlockHash {
     }
 }
 
+impl FieldEncode for VaultAction {
+    type SqlRepr = String;
+
+    fn field_encode(&self) -> String {
+        self.to_str().to_owned()
+    }
+}
+
 // That is called traverse in Haskell
 fn invert<T, E>(x: Option<Result<T, E>>) -> Result<Option<T>, E> {
     x.map_or(Ok(None), |v| v.map(Some))

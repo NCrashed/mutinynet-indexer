@@ -1,14 +1,17 @@
+pub use bitcoin::Txid;
 use bitcoin::{
-    consensus::Decodable, opcodes::all::{OP_PUSHBYTES_14, OP_PUSHBYTES_38, OP_PUSHNUM_8, OP_RETURN}, BlockHash, Script, Transaction, TxOut
+    consensus::Decodable,
+    opcodes::all::{OP_PUSHBYTES_14, OP_PUSHBYTES_38, OP_PUSHNUM_8, OP_RETURN},
+    Script, Transaction, TxOut,
 };
 use core::{assert_eq, fmt::Display, matches, str::FromStr};
 use log::*;
+use serde::{Deserialize, Serialize};
 use std::io::Cursor;
-pub use bitcoin::Txid;
 use thiserror::Error;
 
 /// Action inside the vault tx
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum VaultAction {
     // Open new vault
@@ -354,23 +357,32 @@ pub enum AssumeVolumeErr {
 }
 
 impl VaultTx {
-    /// Try assume BTC volume of the operation. The prediction is not robust, but works for 
+    /// Try assume BTC volume of the operation. The prediction is not robust, but works for
     /// every transaction at the current mutinynet.
     pub fn assume_btc_volume(&self, tx: &Transaction) -> Result<u64, AssumeVolumeErr> {
         match self.action {
             VaultAction::Open => {
                 // First output and second outputs look like a UTXO connectors or inscriptions, so assume 3rd one is usually a custody
-                let custody_output: &TxOut = tx.output.get(2).ok_or(AssumeVolumeErr::NoOpenOutput(tx.compute_txid()))?;
+                let custody_output: &TxOut = tx
+                    .output
+                    .get(2)
+                    .ok_or(AssumeVolumeErr::NoOpenOutput(tx.compute_txid()))?;
                 Ok(custody_output.value.to_sat())
             }
             VaultAction::Deposit => {
                 // First output looks like the deposit amount to custody (same script)
-                let deposit_output: &TxOut = tx.output.get(0).ok_or(AssumeVolumeErr::NoDepositOutput(tx.compute_txid()))?;
+                let deposit_output: &TxOut = tx
+                    .output
+                    .get(0)
+                    .ok_or(AssumeVolumeErr::NoDepositOutput(tx.compute_txid()))?;
                 Ok(deposit_output.value.to_sat())
             }
             VaultAction::Withdraw => {
                 // Second output looks like withdraw (first one is recreated custody)
-                let withdraw_output: &TxOut = tx.output.get(1).ok_or(AssumeVolumeErr::NoWithdrawOutput(tx.compute_txid()))?;
+                let withdraw_output: &TxOut = tx
+                    .output
+                    .get(1)
+                    .ok_or(AssumeVolumeErr::NoWithdrawOutput(tx.compute_txid()))?;
                 Ok(withdraw_output.value.to_sat())
             }
             VaultAction::Borrow => {

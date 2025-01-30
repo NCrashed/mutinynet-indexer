@@ -6,8 +6,8 @@ use log::trace;
 use rusqlite::{named_params, Connection};
 
 use super::super::error::Error;
-use crate::vault::{UnitAmount, VaultAction, VaultId, VaultTx};
 use super::super::loaders::*;
+use crate::vault::{UnitAmount, VaultAction, VaultId, VaultTx};
 
 /// Operations with vault in database
 pub trait DatabaseVault {
@@ -44,7 +44,16 @@ impl DatabaseVault for Connection {
             update_vault(self, &tx)?;
         }
         let prev_balance = find_prev_balance(self, vault_id, block_pos, height)?;
-        insert_vault_tx_raw(self, tx, vault_id, block_hash, block_pos, height, raw_tx, prev_balance)?;
+        insert_vault_tx_raw(
+            self,
+            tx,
+            vault_id,
+            block_hash,
+            block_pos,
+            height,
+            raw_tx,
+            prev_balance,
+        )?;
         Ok(vault_id)
     }
 
@@ -117,7 +126,9 @@ fn insert_vault_tx_raw(
         .consensus_encode(&mut Cursor::new(&mut tx_bytes))
         .map_err(Error::EncodeBitcoinTransaction)?;
 
-    let units_volume = prev_balance.map_or(tx.balance as i32, |old_balance| tx.balance as i32 - old_balance as i32);
+    let units_volume = prev_balance.map_or(tx.balance as i32, |old_balance| {
+        tx.balance as i32 - old_balance as i32
+    });
     let btc_volume = tx.assume_btc_volume(raw_tx)?;
     let mut statement = conn.prepare_cached(query).map_err(Error::PrepareQuery)?;
     statement
@@ -230,7 +241,12 @@ fn find_parent_vault(
     }
 }
 
-fn find_prev_balance(conn: &Connection, vault_id: Txid, block_pos: usize, height: u32) -> Result<Option<UnitAmount>, Error> {
+fn find_prev_balance(
+    conn: &Connection,
+    vault_id: Txid,
+    block_pos: usize,
+    height: u32,
+) -> Result<Option<UnitAmount>, Error> {
     let query = r#"
         SELECT
             height,
@@ -249,14 +265,17 @@ fn find_prev_balance(conn: &Connection, vault_id: Txid, block_pos: usize, height
 
     let mut statement = conn.prepare_cached(query).map_err(Error::PrepareQuery)?;
     let mut rows = statement
-        .query_map(named_params! {
-            ":vault_id": (&vault_id).field_encode(),
-            ":height": height, 
-            ":block_pos": block_pos,
-        }, |row| {
-            let balance = row.get(2)?;
-            Ok(balance)
-        })
+        .query_map(
+            named_params! {
+                ":vault_id": (&vault_id).field_encode(),
+                ":height": height,
+                ":block_pos": block_pos,
+            },
+            |row| {
+                let balance = row.get(2)?;
+                Ok(balance)
+            },
+        )
         .map_err(Error::ExecuteQuery)?;
 
     if let Some(row) = rows.next() {

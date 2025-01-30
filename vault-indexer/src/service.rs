@@ -1,5 +1,6 @@
 use crate::db::vault::advance::DatabaseVaultAdvance;
-use crate::vault::{OraclePrice, UnitAmount, VaultId, VaultTx};
+use crate::db::vault::ActionAggItem;
+use crate::vault::{OraclePrice, UnitAmount, VaultAction, VaultId, VaultTx};
 use crate::Network;
 use crate::{indexer::event::Event, Indexer};
 use bitcoin::hex::HexToArrayError;
@@ -87,8 +88,8 @@ pub fn start_websocket_server(indexer: Arc<Indexer>, bind_addr: &str) -> Result<
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub enum TimeSpan {
-    Hour, 
-    Day, 
+    Hour,
+    Day,
     Week,
     Month,
 }
@@ -121,12 +122,11 @@ pub enum Request {
     },
     #[serde(rename = "action_history")]
     ActionHistory {
+        action: VaultAction,
         timespan: Option<TimeSpan>,
     },
     #[serde(rename = "overall_volume")]
-    OverallVolume {
-        timespan: Option<TimeSpan>,
-    },
+    OverallVolume { timespan: Option<TimeSpan> },
 }
 
 #[derive(Serialize)]
@@ -134,6 +134,7 @@ pub enum Response {
     NewTranscation(VaultTxInfo),
     AllHistory(Vec<VaultTxInfo>),
     VaultHistory(Vec<VaultTxInfo>),
+    ActionHistory(Vec<ActionAggItem>),
     Dummy,
 }
 
@@ -323,12 +324,10 @@ fn process_request(
                 .map_err(|e| Error::ValidateTxid(vault_open_txid, e))?;
             handler_vault_history(network, database, txid, timestamp_start, timestamp_end)
         }
-        Request::ActionHistory {
-            timespan,
-        } => handler_action_history(database, timespan),
-        Request::OverallVolume {
-            timespan,
-        } => handler_overall_volume(database, timespan),
+        Request::ActionHistory { action, timespan } => {
+            handler_action_history(database, action, timespan)
+        }
+        Request::OverallVolume { timespan } => handler_overall_volume(database, timespan),
     }
 }
 
@@ -381,9 +380,15 @@ fn handler_vault_history(
 
 fn handler_action_history(
     database: Arc<Mutex<Connection>>,
+    action: VaultAction,
     timespan: Option<TimeSpan>,
 ) -> Result<Response, Error> {
-    Ok(Response::Dummy)
+    let conn = database.lock().map_err(|_| Error::DbLock)?;
+    let aggs = conn.action_aggregated(
+        action,
+        timespan.map_or(TimeSpan::Day.time_width(), |t| t.time_width()),
+    )?;
+    Ok(Response::ActionHistory(aggs))
 }
 
 fn handler_overall_volume(

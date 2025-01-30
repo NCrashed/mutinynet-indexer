@@ -1,13 +1,11 @@
-use core::unimplemented;
-
-use bitcoin::{BlockHash, Txid};
-use rusqlite::{named_params, Connection, Row};
-
 use super::super::Error;
 use crate::{
     db::loaders::{FieldDecode, FieldEncode},
     vault::{UnitAmount, VaultAction, VaultId, VaultTx},
 };
+use bitcoin::{BlockHash, Txid};
+use rusqlite::{named_params, Connection, Row};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultTxMeta {
@@ -16,14 +14,13 @@ pub struct VaultTxMeta {
     pub block_hash: BlockHash,
     pub block_pos: usize,
     pub height: u32,
-    pub units_volume: i32, 
+    pub units_volume: i32,
     pub btc_volume: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionAggItem {
-    pub timestamp_start: u32, 
-    pub timestamp_end: u32, 
+    pub timestamp_start: u32,
     pub unit_volume: UnitAmount,
     pub btc_volume: u64,
 }
@@ -47,7 +44,7 @@ pub trait DatabaseVaultAdvance {
     fn action_aggregated(
         &self,
         action: VaultAction,
-        timespan: u32, 
+        timespan: u32,
     ) -> Result<Vec<ActionAggItem>, Error>;
 }
 
@@ -102,9 +99,37 @@ impl DatabaseVaultAdvance for Connection {
     fn action_aggregated(
         &self,
         action: VaultAction,
-        timespan: u32, 
+        timespan: u32,
     ) -> Result<Vec<ActionAggItem>, Error> {
-        unimplemented!()
+        let query = r#"
+            SELECT 
+                (oracle_timestamp / :span) * :span AS time_bucket,
+                SUM(units_volume) AS total_units_volume,
+                SUM(btc_volume)   AS total_btc_volume
+            FROM transactions
+            WHERE action = :action
+            GROUP BY time_bucket
+            ORDER BY time_bucket;
+        "#;
+        let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
+        let rows = statement
+            .query_map(
+                named_params! {
+                    ":action": action.field_encode(),
+                    ":span": timespan
+                },
+                |row| {
+                    Ok(ActionAggItem {
+                        timestamp_start: row.get(0)?,
+                        unit_volume: row.get::<_, i32>(1)?.abs() as u32,
+                        btc_volume: row.get::<_, i64>(2)?.abs() as u64,
+                    })
+                },
+            )
+            .map_err(Error::ExecuteQuery)?;
+        Ok(rows
+            .map(|row| row.map_err(Error::FetchRow))
+            .collect::<Result<Vec<_>, Error>>()?)
     }
 }
 
@@ -125,7 +150,7 @@ fn load_vault_meta(row: &Row<'_>) -> Result<VaultTxMeta, rusqlite::Error> {
         block_hash: row.field_decode(11)?,
         block_pos: row.get(2)?,
         height: row.get(12)?,
-        units_volume: row.get(13)?, 
+        units_volume: row.get(13)?,
         btc_volume: row.get(14)?,
     })
 }
