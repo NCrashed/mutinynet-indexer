@@ -114,6 +114,7 @@ pub enum Request {
 #[derive(Serialize)]
 pub enum Response {
     AllHistory(Vec<VaultTxInfo>),
+    VaultHistory(Vec<VaultTxInfo>),
     Dummy,
 }
 
@@ -299,7 +300,7 @@ fn process_request(
         } => {
             let txid = Txid::from_str(&vault_open_txid)
                 .map_err(|e| Error::ValidateTxid(vault_open_txid, e))?;
-            handler_vault_history(database, txid, timestamp_start, timestamp_end)
+            handler_vault_history(network, database, txid, timestamp_start, timestamp_end)
         }
         Request::ActionHistory {
             timestamp_start,
@@ -336,12 +337,27 @@ fn handler_all_history(
 }
 
 fn handler_vault_history(
+    network: Network,
     database: Arc<Mutex<Connection>>,
     vault_open_txid: Txid,
     timestamp_start: Option<u32>,
     timestamp_end: Option<u32>,
 ) -> Result<Response, Error> {
-    Ok(Response::Dummy)
+    let conn = database.lock().map_err(|_| Error::DbLock)?;
+    let metas = conn.range_history_vault(vault_open_txid, timestamp_start, timestamp_end)?;
+    let infos = metas
+        .into_iter()
+        .map(|meta| {
+            VaultTxInfo::new(
+                network,
+                meta.vault_id,
+                &meta.vault_tx,
+                meta.block_hash,
+                meta.height,
+            )
+        })
+        .collect();
+    Ok(Response::VaultHistory(infos))
 }
 
 fn handler_action_history(

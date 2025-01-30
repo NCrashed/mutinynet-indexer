@@ -39,7 +39,10 @@ To test the endpoints one can use `./run-client` script that uses [websocat]() t
 ```json
 {"method": "range_history_all", "timestamp_start": 1738113524, "timestamp_end": 1738225126 }
 ```
-* `vault_history_tx`: Return all transactions for a given vault within a specified time range.
+* `vault_history_tx`: Return all transactions for a given vault within a specified time range. Example:
+```json 
+{"method": "vault_history_tx", "vault_open_txid":"a9cefa754a2a35272365fe3bbca0051bc2b46857f58a671e7c338c5e9d6d3244","timestamp_start": 1738113524, "timestamp_end": 1738225126 }
+```
 * `action_history`: Return aggregated action data over specified time spans (e.g., daily, weekly).
 * `overall_volume`: Return aggregated volume metrics (BTC and units) over a specified time span.
 
