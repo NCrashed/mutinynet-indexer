@@ -48,6 +48,7 @@ struct Args {
     rescan: bool,
 }
 
+#[allow(clippy::result_large_err)]
 fn main() -> Result<(), Error> {
     if env::var("RUST_LOG").is_err() {
         let _ = env::set_var("RUST_LOG", "debug");
@@ -74,20 +75,15 @@ fn main() -> Result<(), Error> {
     };
 
     debug!("Spawn weboscket service");
-    match service::start_websocket_server(indexer.clone(), &args.websocket_address) {
-        Err(e) => {
-            error!("Failed to start websocket service: {e}");
-            return Err(e.into());
-        }
-        _ => (),
+    if let Err(e) = service::start_websocket_server(indexer.clone(), &args.websocket_address) {
+        error!("Failed to start websocket service: {e}");
+        return Err(e.into());
     }
 
     debug!("Start indexer");
-    match indexer.run() {
-        Err(e) => {
-            error!("Indexing fatal error: {e}");
-            return Err(e.into());
-        }
-        Ok(_) => Ok(()),
+    if let Err(e) = indexer.run() {
+        error!("Indexing fatal error: {e}");
+        return Err(e.into());
     }
+    Ok(())
 }

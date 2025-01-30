@@ -56,9 +56,8 @@ impl DatabaseVaultAdvance for Connection {
                 load_vault_meta,
             )
             .map_err(Error::ExecuteQuery)?;
-        Ok(rows
-            .map(|row| row.map_err(Error::FetchRow))
-            .collect::<Result<Vec<_>, Error>>()?)
+        rows.map(|row| row.map_err(Error::FetchRow))
+            .collect::<Result<Vec<_>, Error>>()
     }
 
     fn range_history_vault(
@@ -82,9 +81,8 @@ impl DatabaseVaultAdvance for Connection {
                 load_vault_meta,
             )
             .map_err(Error::ExecuteQuery)?;
-        Ok(rows
-            .map(|row| row.map_err(Error::FetchRow))
-            .collect::<Result<Vec<_>, Error>>()?)
+        rows.map(|row| row.map_err(Error::FetchRow))
+            .collect::<Result<Vec<_>, Error>>()
     }
 
     fn action_aggregated(
@@ -118,9 +116,8 @@ impl DatabaseVaultAdvance for Connection {
                 },
             )
             .map_err(Error::ExecuteQuery)?;
-        Ok(rows
-            .map(|row| row.map_err(Error::FetchRow))
-            .collect::<Result<Vec<_>, Error>>()?)
+        rows.map(|row| row.map_err(Error::FetchRow))
+            .collect::<Result<Vec<_>, Error>>()
     }
 
     fn overall_volume(&self) -> Result<(i64, i32), Error> {

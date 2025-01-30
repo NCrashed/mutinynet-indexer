@@ -135,6 +135,7 @@ pub struct OverallVolume {
     unit_volume: i32,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Serialize)]
 pub enum Response {
     NewTranscation(VaultTxInfo),
@@ -171,6 +172,7 @@ pub struct VaultTxInfo {
 }
 
 impl VaultTxInfo {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         network: Network,
         vault_id: VaultId,
@@ -192,7 +194,7 @@ impl VaultTxInfo {
             oracle_price: vault_tx.oracle_price,
             oracle_timestamp: vault_tx.oracle_timestamp,
             liquidation_price: vault_tx.liquidation_price,
-            liquidation_hash: vault_tx.liquidation_hash.map(|h| hex::encode(&h)),
+            liquidation_hash: vault_tx.liquidation_hash.map(hex::encode),
             block_hash: block_hash.to_string(),
             height,
             tx_url: network.explorer_url(vault_tx.txid),
@@ -237,28 +239,27 @@ fn client_handler(
         let addr = addr.to_owned();
         move || -> Result<(), Error> {
             for event in events_bus {
-                match event {
-                    Event::NewTransaction(new_tx) => {
-                        trace!(
-                            "Got message about new tx {} for vault {}",
-                            new_tx.vault_tx.txid,
-                            new_tx.vault_id
-                        );
-                        let info = VaultTxInfo::from_db_metainfo(network, &new_tx);
-                        let encoded_info = match serde_json::to_string(&Response::NewTranscation(
-                            info,
-                        )) {
-                            Err(e) => {
-                                error!("Failed to encode tx {} for vault {} for client {addr}, reason: {}", new_tx.vault_tx.txid, new_tx.vault_id, e);
-                                continue;
-                            }
-                            Ok(str) => str,
-                        };
-                        sender
-                            .send(Message::text(encoded_info))
-                            .map_err(|_| Error::SendingBus)?;
-                    }
-                    _ => (),
+                if let Event::NewTransaction(new_tx) = event {
+                    trace!(
+                        "Got message about new tx {} for vault {}",
+                        new_tx.vault_tx.txid,
+                        new_tx.vault_id
+                    );
+                    let info = VaultTxInfo::from_db_metainfo(network, &new_tx);
+                    let encoded_info = match serde_json::to_string(&Response::NewTranscation(info))
+                    {
+                        Err(e) => {
+                            error!(
+                                "Failed to encode tx {} for vault {} for client {addr}, reason: {}",
+                                new_tx.vault_tx.txid, new_tx.vault_id, e
+                            );
+                            continue;
+                        }
+                        Ok(str) => str,
+                    };
+                    sender
+                        .send(Message::text(encoded_info))
+                        .map_err(|_| Error::SendingBus)?;
                 }
             }
             Ok(())

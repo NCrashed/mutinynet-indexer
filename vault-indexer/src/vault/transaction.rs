@@ -52,8 +52,8 @@ impl FromStr for VaultAction {
 }
 
 impl VaultAction {
-    pub fn to_protocol(&self) -> u8 {
-        *self as u8
+    pub fn to_protocol(self) -> u8 {
+        self as u8
     }
 
     pub fn from_protocol(v: u8) -> Option<Self> {
@@ -67,7 +67,7 @@ impl VaultAction {
         }
     }
 
-    pub fn to_str(&self) -> &str {
+    pub fn to_str(self) -> &'static str {
         match self {
             VaultAction::Open => "open",
             VaultAction::Deposit => "deposit",
@@ -349,11 +349,11 @@ impl VaultTx {
 #[derive(Debug, Error)]
 pub enum AssumeCustodyErr {
     #[error("Open transaction {0} has no custody output")]
-    NoOpenOutput(Txid),
+    Open(Txid),
     #[error("Deposit transaction {0} has no outputs for custody")]
-    NoDepositOutput(Txid),
+    Deposit(Txid),
     #[error("Withdraw transaction {0} has no outputs for custody")]
-    NoWithdrawOutput(Txid),
+    Withdraw(Txid),
 }
 
 impl VaultTx {
@@ -365,61 +365,17 @@ impl VaultTx {
                 let custody_output: &TxOut = tx
                     .output
                     .get(2)
-                    .ok_or(AssumeCustodyErr::NoOpenOutput(tx.compute_txid()))?;
+                    .ok_or(AssumeCustodyErr::Open(tx.compute_txid()))?;
                 Ok(custody_output.value.to_sat())
             }
             _ => {
                 // First output looks like volume of custody (same script)
                 let cur_custody: &TxOut = tx
                     .output
-                    .get(0)
-                    .ok_or(AssumeCustodyErr::NoDepositOutput(tx.compute_txid()))?;
+                    .first()
+                    .ok_or(AssumeCustodyErr::Deposit(tx.compute_txid()))?;
 
                 Ok(cur_custody.value.to_sat())
-            }
-        }
-    }
-
-    /// Try assume BTC volume of the operation. The prediction is not robust, but works for
-    /// every transaction at the current mutinynet.
-    pub fn assume_btc_volume(
-        &self,
-        tx: &Transaction,
-        prev_custody: u64,
-    ) -> Result<i64, AssumeCustodyErr> {
-        match self.action {
-            VaultAction::Open => {
-                // First output and second outputs look like a UTXO connectors or inscriptions, so assume 3rd one is usually a custody
-                let custody_output: &TxOut = tx
-                    .output
-                    .get(2)
-                    .ok_or(AssumeCustodyErr::NoOpenOutput(tx.compute_txid()))?;
-                Ok(custody_output.value.to_sat() as i64)
-            }
-            VaultAction::Deposit => {
-                // First output looks like volume of custody (same script), so subtract the previous custody value
-                let cur_custody: &TxOut = tx
-                    .output
-                    .get(0)
-                    .ok_or(AssumeCustodyErr::NoDepositOutput(tx.compute_txid()))?;
-
-                Ok(cur_custody.value.to_sat() as i64 - prev_custody as i64)
-            }
-            VaultAction::Withdraw => {
-                // First output looks like volume of custody (same script), so subtract the previous custody value
-                let cur_custody: &TxOut = tx
-                    .output
-                    .get(0)
-                    .ok_or(AssumeCustodyErr::NoWithdrawOutput(tx.compute_txid()))?;
-                Ok(cur_custody.value.to_sat() as i64 - prev_custody as i64)
-            }
-            VaultAction::Borrow => {
-                // Borrow by design shouldn't touch BTC balance
-                Ok(0)
-            }
-            VaultAction::Repay => {
-                // Repay by design shouldn't touch BTC balance
-                Ok(0)
             }
         }
     }
@@ -431,23 +387,23 @@ trait BytesParser {
     fn next20(&mut self) -> Option<[u8; 20]>;
 
     fn next_u32_be(&mut self) -> Option<u32> {
-        self.next4().map(|bytes| u32::from_be_bytes(bytes))
+        self.next4().map(u32::from_be_bytes)
     }
 }
 
 impl<T: Iterator<Item = u8>> BytesParser for T {
     fn next4(&mut self) -> Option<[u8; 4]> {
         let mut buf = [0u8; 4];
-        for i in 0..4 {
-            buf[i] = self.next()?;
+        for item in &mut buf {
+            *item = self.next()?;
         }
         Some(buf)
     }
 
     fn next20(&mut self) -> Option<[u8; 20]> {
         let mut buf = [0u8; 20];
-        for i in 0..20 {
-            buf[i] = self.next()?;
+        for item in &mut buf {
+            *item = self.next()?;
         }
         Some(buf)
     }

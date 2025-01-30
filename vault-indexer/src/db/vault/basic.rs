@@ -51,13 +51,13 @@ impl DatabaseVault for Connection {
         raw_tx: &bitcoin::Transaction,
     ) -> Result<VaultTxMeta, Error> {
         trace!("Search vault");
-        let vault_id = find_parent_vault(self, &tx, &raw_tx)?;
+        let vault_id = find_parent_vault(self, tx, raw_tx)?;
 
         let conn_tx = self.transaction().map_err(Error::StartTransaction)?;
 
         // Fetch custody and balance infromation to properly save updates in metainfo
         let (btc_custody, prev_custody, prev_balance, prev_tx) = if tx.action == VaultAction::Open {
-            let btc_custody = create_vault(&conn_tx, &tx, raw_tx)?;
+            let btc_custody = create_vault(&conn_tx, tx, raw_tx)?;
             trace!("Get vault information for freshly created");
             let (_, prev_balance, prev_tx) = get_vault_chaining_info(&conn_tx, vault_id)?;
             (btc_custody, btc_custody, prev_balance, prev_tx) // Prev custody and current are the same for new one
@@ -65,7 +65,7 @@ impl DatabaseVault for Connection {
             trace!("Get vault information");
             let (prev_custody, prev_balance, prev_tx) =
                 get_vault_chaining_info(&conn_tx, vault_id)?;
-            let btc_custody = update_vault(&conn_tx, vault_id, &tx, raw_tx)?;
+            let btc_custody = update_vault(&conn_tx, vault_id, tx, raw_tx)?;
             (btc_custody, prev_custody, prev_balance, prev_tx)
         };
 
@@ -129,6 +129,7 @@ impl DatabaseVault for Connection {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn insert_vault_tx_raw(
     conn: &Connection,
     tx: &VaultTx,
@@ -175,7 +176,7 @@ fn insert_vault_tx_raw(
     } else {
         tx.balance as i32 - prev_balance as i32
     };
-    let cur_custody = tx.assume_custody_value(&raw_tx)?;
+    let cur_custody = tx.assume_custody_value(raw_tx)?;
     let btc_volume: i64 = if tx.action == VaultAction::Open {
         cur_custody as i64
     } else {

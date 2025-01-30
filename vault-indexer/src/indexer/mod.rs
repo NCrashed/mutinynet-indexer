@@ -36,10 +36,23 @@ pub mod event;
 pub mod network;
 mod node;
 
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub struct Error(Box<ErrorKind>);
+
+impl<E> From<E> for Error
+where
+    ErrorKind: From<E>,
+{
+    fn from(err: E) -> Self {
+        Error(Box::new(ErrorKind::from(err)))
+    }
+}
+
 /// All kind of errors the indexer can produce
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum Error {
+pub enum ErrorKind {
     #[error("Failed to read from events bus, disconnected.")]
     EventBusRecv,
     #[error("Failed to send event to bus: {0}")]
@@ -108,7 +121,7 @@ impl Indexer {
         Ok(self
             .headers_cache
             .lock()
-            .map_err(|_| Error::HeadersCacheLock)?
+            .map_err(|_| ErrorKind::HeadersCacheLock)?
             .get_current_height())
     }
 
@@ -124,7 +137,10 @@ impl Indexer {
 
     /// Make a events receiver to listen events about the indexing
     pub fn add_event_reader(&self) -> Result<BusReader<Event>, Error> {
-        let mut events_bus = self.events_bus.lock().map_err(|_| Error::EventsBusLock)?;
+        let mut events_bus = self
+            .events_bus
+            .lock()
+            .map_err(|_| ErrorKind::EventsBusLock)?;
         Ok(events_bus.add_rx())
     }
 
@@ -134,7 +150,10 @@ impl Indexer {
         // Make events fan-in
         let (events_sender, events_receiver) = sync_channel(EVENTS_CAPACITY);
         // Make events fan-out
-        let mut events_bus = self.events_bus.lock().map_err(|_| Error::EventsBusLock)?;
+        let mut events_bus = self
+            .events_bus
+            .lock()
+            .map_err(|_| ErrorKind::EventsBusLock)?;
         // Register all readers of events in advance
         let node_receiver = events_bus.add_rx();
         let mut main_receiver = events_bus.add_rx();
@@ -145,7 +164,7 @@ impl Indexer {
 
         // User requested rescan of blocks
         if self.rescan {
-            let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+            let conn = self.database.lock().map_err(|_| ErrorKind::DatabaseLock)?;
             conn.set_scanned_height(self.start_height)?;
         }
 
@@ -155,7 +174,7 @@ impl Indexer {
             move || -> Result<(), Error> {
                 // Will end as soon as events receiver is dropped
                 for event in events_receiver.iter() {
-                    let mut events_bus = events_bus.lock().map_err(|_| Error::EventsBusLock)?;
+                    let mut events_bus = events_bus.lock().map_err(|_| ErrorKind::EventsBusLock)?;
                     events_bus.broadcast(event);
                 }
                 Ok(())
@@ -200,7 +219,7 @@ impl Indexer {
                 Err(mpmc::RecvTimeoutError::Disconnected) => {
                     stop_flag.store(true, atomic::Ordering::Relaxed);
                     events_sender.send(Event::Termination)?;
-                    return Err(Error::EventBusRecv);
+                    return Err(ErrorKind::EventBusRecv.into());
                 }
                 Ok(Event::Handshaked(remote_height)) => {
                     self.on_handshake(remote_height, &events_sender)?
@@ -241,7 +260,7 @@ impl Indexer {
         let cache = self
             .headers_cache
             .lock()
-            .map_err(|_| Error::HeadersCacheLock)?;
+            .map_err(|_| ErrorKind::HeadersCacheLock)?;
         let headers_msg = cache.make_get_headers()?;
         events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
             headers_msg,
@@ -263,9 +282,9 @@ impl Indexer {
             let mut cache = self
                 .headers_cache
                 .lock()
-                .map_err(|_| Error::HeadersCacheLock)?;
+                .map_err(|_| ErrorKind::HeadersCacheLock)?;
             cache.update_longest_chain(&headers)?;
-            let mut conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+            let mut conn = self.database.lock().map_err(|_| ErrorKind::DatabaseLock)?;
             cache.store(&mut conn)?;
             let current_height = cache.get_current_height();
             let mut remote_height = self.remote_height.load(atomic::Ordering::Relaxed);
@@ -287,7 +306,7 @@ impl Indexer {
                 let cache = self
                     .headers_cache
                     .lock()
-                    .map_err(|_| Error::HeadersCacheLock)?;
+                    .map_err(|_| ErrorKind::HeadersCacheLock)?;
                 cache.make_get_headers()?
             };
             debug!("Requesting next headers batch");
@@ -299,10 +318,10 @@ impl Indexer {
             let cache = self
                 .headers_cache
                 .lock()
-                .map_err(|_| Error::HeadersCacheLock)?;
+                .map_err(|_| ErrorKind::HeadersCacheLock)?;
             let height = cache.get_current_height();
             let scanned_height = {
-                let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+                let conn = self.database.lock().map_err(|_| ErrorKind::DatabaseLock)?;
                 conn.get_scanned_height()?
             };
 
@@ -331,7 +350,7 @@ impl Indexer {
             let cache = self
                 .headers_cache
                 .lock()
-                .map_err(|_| Error::HeadersCacheLock)?;
+                .map_err(|_| ErrorKind::HeadersCacheLock)?;
             cache.get_header(hash)?.height
         };
 
@@ -349,7 +368,7 @@ impl Indexer {
             let cache = self
                 .headers_cache
                 .lock()
-                .map_err(|_| Error::HeadersCacheLock)?;
+                .map_err(|_| ErrorKind::HeadersCacheLock)?;
             let current_height = cache.get_current_height();
             let scanned_part = 100.0 * scanned_height as f64 / current_height as f64;
             info!(
@@ -358,7 +377,7 @@ impl Indexer {
             );
 
             // Store how much we scanned
-            let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+            let conn = self.database.lock().map_err(|_| ErrorKind::DatabaseLock)?;
             conn.set_scanned_height(scanned_height)?;
 
             if scanned_height < current_height {
@@ -382,22 +401,19 @@ impl Indexer {
         events_sender: &Sender<Event>,
     ) -> Result<(), Error> {
         for inv in invs {
-            match inv {
-                Inventory::Block(hash) => {
-                    let cache = self
-                        .headers_cache
-                        .lock()
-                        .map_err(|_| Error::HeadersCacheLock)?;
+            if let Inventory::Block(hash) = inv {
+                let cache = self
+                    .headers_cache
+                    .lock()
+                    .map_err(|_| ErrorKind::HeadersCacheLock)?;
 
-                    // Check if we know the header
-                    if cache.get_header(hash).is_err() {
-                        let headers_msg = cache.make_get_headers()?;
-                        events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
-                            headers_msg,
-                        )))?;
-                    }
+                // Check if we know the header
+                if cache.get_header(hash).is_err() {
+                    let headers_msg = cache.make_get_headers()?;
+                    events_sender.send(Event::OutcomingMessage(NetworkMessage::GetHeaders(
+                        headers_msg,
+                    )))?;
                 }
-                _ => (),
             }
         }
         Ok(())
@@ -419,15 +435,17 @@ impl Indexer {
                     info!("New vault {} transaction: {}", vtx.action, vtx.txid);
                     debug!("Found a vault transaction: {:#?}", vtx);
 
-                    let mut conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+                    let mut conn = self.database.lock().map_err(|_| ErrorKind::DatabaseLock)?;
                     match conn.store_vault_tx(&vtx, block_hash, i, height, &tx) {
                         Err(e) => {
                             error!("Failed to store vault tx {} from block {block_hash} at height {height}, reason: {}", vtx.txid, e);
                             //panic!("Stop here for debug");
                         }
                         Ok(meta) => {
-                            let mut events_bus =
-                                self.events_bus.lock().map_err(|_| Error::EventsBusLock)?;
+                            let mut events_bus = self
+                                .events_bus
+                                .lock()
+                                .map_err(|_| ErrorKind::EventsBusLock)?;
                             events_bus.broadcast(Event::NewTransaction(meta));
                         }
                     }

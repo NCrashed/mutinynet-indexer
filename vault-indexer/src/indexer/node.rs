@@ -29,9 +29,22 @@ const DEFAULT_USER_AGENT: &str = "Vault indexer 0.1.0";
 /// The maximum amount of headers node will return for getheaders message
 pub const MAX_HEADERS_PER_MSG: usize = 2000;
 
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub struct Error(Box<ErrorKind>);
+
+impl<E> From<E> for Error
+where
+    ErrorKind: From<E>,
+{
+    fn from(err: E) -> Self {
+        Error(Box::new(ErrorKind::from(err)))
+    }
+}
+
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum Error {
+pub enum ErrorKind {
     #[error("Failed to send event to bus: {0}")]
     EventBusSend(#[from] SendError<Event>),
     #[error("Failed to receive event to bus, disconnected")]
@@ -82,11 +95,14 @@ pub fn node_worker(
         events_sender.clone(),
         events_receiver,
     );
-    match res {
-        Err(e @ (Error::EventBusSend(_) | Error::EventBusRecv | Error::WrongMagic(_, _))) => {
+    match res.map_err(|e| *e.0) {
+        Err(
+            e
+            @ (ErrorKind::EventBusSend(_) | ErrorKind::EventBusRecv | ErrorKind::WrongMagic(_, _)),
+        ) => {
             // We consider that reconnection doesn't have sense in these cases
             error!("{e}");
-            return Err(e);
+            Err(e.into())
         }
         Err(e) => {
             error!("{e}");
@@ -97,7 +113,7 @@ pub fn node_worker(
         }
         Ok(_) => {
             // Termination procedure
-            return Ok(());
+            Ok(())
         }
     }
 }
@@ -119,16 +135,15 @@ fn node_process(
         Ok(stream) => stream,
     };
     // Notify top level logic that we are connected
-    match events_sender.send(Event::Handshaked(remote_height)) {
-        Err(e) => return (Err(Error::EventBusSend(e)), events_receiver),
-        Ok(()) => (),
+    if let Err(e) = events_sender.send(Event::Handshaked(remote_height)) {
+        return (Err(ErrorKind::EventBusSend(e).into()), events_receiver);
     }
     debug!("Handshake event sent");
     let stop_flag = Arc::new(AtomicBool::new(false));
 
     // Spawn a thread read from the socket
-    let mut receiver_stream = match stream.try_clone().map_err(Error::SocketCloneFail) {
-        Err(e) => return (Err(e), events_receiver),
+    let mut receiver_stream = match stream.try_clone().map_err(ErrorKind::SocketCloneFail) {
+        Err(e) => return (Err(e.into()), events_receiver),
         Ok(stream) => stream,
     };
     let receiver_handle = {
@@ -140,17 +155,17 @@ fn node_process(
                     break Ok(());
                 }
 
-                match receive_message(&mut receiver_stream, network) {
+                match receive_message(&mut receiver_stream, network).map_err(|e| *e.0) {
                     Ok(msg) => {
                         events_sender
                             .send(Event::IncomingMessage(msg))
-                            .map_err(Error::EventBusSend)?;
+                            .map_err(ErrorKind::EventBusSend)?;
                     }
-                    Err(e @ Error::DecodingMessage(_, _)) => {
+                    Err(e @ ErrorKind::DecodingMessage(_, _)) => {
                         // We consider that recoverable
                         error!("{e}");
                     }
-                    Err(e) => return Err(e), // Should reconnect
+                    Err(e) => return Err(e.into()), // Should reconnect
                 }
             }
         })
@@ -176,18 +191,17 @@ fn node_process(
                 // Shutdown socket to force unblocking operations on it, ignore error here if occurs
                 if let Err(e) = stream
                     .shutdown(Shutdown::Both)
-                    .map_err(Error::SocketShutdownFail)
+                    .map_err(ErrorKind::SocketShutdownFail)
                 {
                     error!("At shutdown procedure we got {e}");
                 }
 
-                return (Err(Error::EventBusRecv), events_receiver);
+                return (Err(ErrorKind::EventBusRecv.into()), events_receiver);
             }
             Ok(Event::OutcomingMessage(msg)) => {
                 debug!("Got message to send");
-                match send_message(&mut stream, network, msg) {
-                    Err(e) => return (Err(e), events_receiver),
-                    Ok(()) => (),
+                if let Err(e) = send_message(&mut stream, network, msg) {
+                    return (Err(e), events_receiver);
                 }
             }
             Ok(Event::Termination) => {
@@ -196,7 +210,7 @@ fn node_process(
                 // Shutdown socket to force unblocking operations on it, ignore error here if occurs
                 if let Err(e) = stream
                     .shutdown(Shutdown::Both)
-                    .map_err(Error::SocketShutdownFail)
+                    .map_err(ErrorKind::SocketShutdownFail)
                 {
                     error!("At shutdown procedure we got {e}");
                 }
@@ -217,17 +231,17 @@ fn node_handshake(
     debug!("Resolving address to node {address}...");
     let mut sock_addrs = address
         .to_socket_addrs()
-        .map_err(|e| Error::FailedResolve(address.to_owned(), e))?;
+        .map_err(|e| ErrorKind::FailedResolve(address.to_owned(), e))?;
     let node_addr = if let Some(addr) = sock_addrs.next() {
         addr
     } else {
-        return Err(Error::NoSocketAddress(address.to_owned()));
+        return Err(ErrorKind::NoSocketAddress(address.to_owned()).into());
     };
 
     // TODO: use connect_timeout and list of nodes
     debug!("Connecting to the {address} node...");
     let mut stream =
-        TcpStream::connect(address).map_err(|e| Error::Connection(address.to_owned(), e))?;
+        TcpStream::connect(address).map_err(|e| ErrorKind::Connection(address.to_owned(), e))?;
     info!("Connected to the {address} node");
 
     trace!("Handshaking");
@@ -241,11 +255,11 @@ fn node_handshake(
         // really don't care the correctness of the message
         debug!("Got version message from peer");
         if ver.nonce == self_nonce {
-            return Err(Error::SelfConnection);
+            return Err(ErrorKind::SelfConnection.into());
         }
         ver.start_height
     } else {
-        return Err(Error::NoVersionMessage);
+        return Err(ErrorKind::NoVersionMessage.into());
     };
 
     // Send verack message that we accept their version
@@ -257,7 +271,7 @@ fn node_handshake(
     if let NetworkMessage::Verack = second_msg {
         debug!("Got verack message from peer");
     } else {
-        return Err(Error::NoVerackMessage);
+        return Err(ErrorKind::NoVerackMessage.into());
     }
     debug!("Handshake finish");
     Ok((stream, remote_height as u32))
@@ -273,8 +287,8 @@ fn send_message(
     let bytes = encode::serialize(&raw_msg);
     stream
         .write_all(&bytes)
-        .map_err(|e| Error::SendingMsg(msg.clone(), e))?;
-    stream.flush().map_err(|e| Error::SendingMsg(msg, e))?;
+        .map_err(|e| ErrorKind::SendingMsg(msg.clone(), e))?;
+    stream.flush().map_err(|e| ErrorKind::SendingMsg(msg, e))?;
     Ok(())
 }
 
@@ -284,13 +298,13 @@ fn receive_message(stream: &mut TcpStream, network: Network) -> Result<NetworkMe
     let mut header_buf = [0u8; HEADER_SIZE];
     stream
         .read_exact(&mut header_buf)
-        .map_err(Error::ReceivingHeader)?;
+        .map_err(ErrorKind::ReceivingHeader)?;
     trace!("Received header");
     // Checking magic bytes
     let magic = &header_buf[0..4];
     let our_magic = network.magic().to_bytes();
     if magic != our_magic {
-        return Err(Error::WrongMagic(magic.to_owned(), our_magic));
+        return Err(ErrorKind::WrongMagic(magic.to_owned(), our_magic).into());
     }
     // Extracting the payload size from the header
     let payload_len_bytes = &header_buf[16..20];
@@ -302,12 +316,12 @@ fn receive_message(stream: &mut TcpStream, network: Network) -> Result<NetworkMe
     let mut payload = vec![0u8; HEADER_SIZE + payload_len as usize];
     stream
         .read_exact(&mut payload[HEADER_SIZE..])
-        .map_err(Error::ReceivingPayload)?;
+        .map_err(ErrorKind::ReceivingPayload)?;
     trace!("Read payload");
     // Copy header into start of payload and parse
     payload[0..HEADER_SIZE].copy_from_slice(&header_buf);
     let msg: RawNetworkMessage =
-        consensus::deserialize(&payload).map_err(|e| Error::DecodingMessage(e, payload))?;
+        consensus::deserialize(&payload).map_err(|e| ErrorKind::DecodingMessage(e, payload))?;
     trace!("Deserialized message: {msg:?}");
     Ok(msg.into_payload())
 }

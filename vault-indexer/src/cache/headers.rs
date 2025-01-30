@@ -12,7 +12,7 @@ use bitcoin::{
 use core::{fmt::Display, iter::Iterator};
 use log::*;
 use rusqlite::Connection;
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 pub struct HeadersCache {
     headers: HashMap<BlockHash, HeaderRecord>,
@@ -161,7 +161,7 @@ impl HeadersCache {
             debug!("Extending the current main chain");
 
             let tip_record = self.get_header(self.best_tip)?;
-            let extension_chain = HeaderChain::from_headers(tip_record.header, &headers[..]);
+            let extension_chain = HeaderChain::from_headers(tip_record.header, headers);
             self.store_active(extension_chain)?;
         } else {
             debug!("Fork detected");
@@ -172,8 +172,8 @@ impl HeadersCache {
                 debug!("The new chain is orphan");
                 for header in headers {
                     self.orphans.insert(header.block_hash(), *header);
-                    return Ok(());
                 }
+                return Ok(());
             }
 
             // Find the first shared ancestor of the current chain and the new one
@@ -181,7 +181,7 @@ impl HeadersCache {
             let mut new_chain =
                 self.get_chain_until(first_header.prev_blockhash, |r| r.in_longest)?;
             debug!("Extending the new chain with arrived headers");
-            new_chain.extend_tip(&headers)?;
+            new_chain.extend_tip(headers)?;
             debug!("Getting the main chain until has the mutual ancestor");
             let main_chain = self.get_chain_until(self.best_tip, |r| {
                 r.header.block_hash() == new_chain.root_hash()
@@ -269,7 +269,20 @@ impl HeadersCache {
 
         for header in chain.headers() {
             let hash = header.block_hash();
-            if self.headers.contains_key(&hash) {
+            if let Entry::Vacant(e) = self.headers.entry(hash) {
+                // insert new
+                let height = prev_record.height + 1;
+                let new_record = HeaderRecord {
+                    header,
+                    height,
+                    in_longest: true,
+                };
+                e.insert(new_record.clone());
+                self.main_chain[height as usize] = hash;
+                self.orphans.remove(&hash);
+                self.dirty.push(hash);
+                prev_record = new_record;
+            } else {
                 // activate
                 let header_record = self
                     .headers
@@ -279,19 +292,6 @@ impl HeadersCache {
                 self.main_chain[header_record.height as usize] = hash;
                 self.dirty.push(hash);
                 prev_record = header_record.clone();
-            } else {
-                // insert new
-                let height = prev_record.height + 1;
-                let new_record = HeaderRecord {
-                    header,
-                    height,
-                    in_longest: true,
-                };
-                self.headers.insert(hash, new_record.clone());
-                self.main_chain[height as usize] = hash;
-                self.orphans.remove(&hash);
-                self.dirty.push(hash);
-                prev_record = new_record;
             }
         }
 
@@ -312,13 +312,13 @@ impl HeadersCache {
             .clone();
         for header in chain.headers() {
             let hash = header.block_hash();
-            if !self.headers.contains_key(&hash) {
+            if let Entry::Vacant(e) = self.headers.entry(hash) {
                 let new_record = HeaderRecord {
                     header,
                     height: prev_record.height + 1,
                     in_longest: false,
                 };
-                self.headers.insert(hash, new_record.clone());
+                e.insert(new_record.clone());
                 self.orphans.remove(&hash);
                 self.dirty.push(hash);
                 prev_record = new_record;
@@ -378,7 +378,7 @@ impl HeaderChain {
     /// Create from range of headers
     pub fn from_headers(root: Header, headers: &[Header]) -> Self {
         HeaderChain {
-            root: root.clone(),
+            root,
             trunk_rev: vec![],
             trunk_for: headers.to_owned(),
         }
@@ -394,7 +394,7 @@ impl HeaderChain {
         if let Some(header) = headers.first() {
             let current_tip = self.tip_hash();
             if current_tip == header.prev_blockhash {
-                self.trunk_for.extend_from_slice(&headers);
+                self.trunk_for.extend_from_slice(headers);
                 Ok(())
             } else {
                 Err(Error::ChainMismatchTip(current_tip, header.block_hash()))

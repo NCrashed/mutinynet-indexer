@@ -11,7 +11,7 @@ pub trait FieldDecode<T> {
     fn field_decode(&self, index: usize) -> Result<T, rusqlite::Error>;
 }
 
-impl<'a> FieldDecode<Txid> for Row<'a> {
+impl FieldDecode<Txid> for Row<'_> {
     fn field_decode(&self, index: usize) -> Result<Txid, rusqlite::Error> {
         let txid_bytes = self.get::<_, Vec<u8>>(index)?;
         let txid_bytes_sized = txid_bytes.clone().try_into().map_err(|_| {
@@ -25,7 +25,7 @@ impl<'a> FieldDecode<Txid> for Row<'a> {
     }
 }
 
-impl<'a> FieldDecode<BlockHash> for Row<'a> {
+impl FieldDecode<BlockHash> for Row<'_> {
     fn field_decode(&self, index: usize) -> Result<BlockHash, rusqlite::Error> {
         let hash_bytes = self.get::<_, Vec<u8>>(index)?;
         let hash_bytes_sized = hash_bytes.clone().try_into().map_err(|_| {
@@ -39,7 +39,7 @@ impl<'a> FieldDecode<BlockHash> for Row<'a> {
     }
 }
 
-impl<'a> FieldDecode<VaultVersion> for Row<'a> {
+impl FieldDecode<VaultVersion> for Row<'_> {
     fn field_decode(&self, index: usize) -> Result<VaultVersion, rusqlite::Error> {
         let version_str = self.get::<_, String>(index)?;
         let version = VaultVersion::from_str(&version_str).map_err(|e| {
@@ -49,7 +49,7 @@ impl<'a> FieldDecode<VaultVersion> for Row<'a> {
     }
 }
 
-impl<'a> FieldDecode<VaultAction> for Row<'a> {
+impl FieldDecode<VaultAction> for Row<'_> {
     fn field_decode(&self, index: usize) -> Result<VaultAction, rusqlite::Error> {
         let action_str = self.get::<_, String>(index)?;
         let action = VaultAction::from_str(&action_str).map_err(|e| {
@@ -59,7 +59,7 @@ impl<'a> FieldDecode<VaultAction> for Row<'a> {
     }
 }
 
-impl<'a> FieldDecode<[u8; 20]> for Row<'a> {
+impl FieldDecode<[u8; 20]> for Row<'_> {
     fn field_decode(&self, index: usize) -> Result<[u8; 20], rusqlite::Error> {
         let bytes = self.get::<_, Vec<u8>>(index)?;
         let bytes_sized = bytes.clone().try_into().map_err(|_| {
@@ -73,7 +73,7 @@ impl<'a> FieldDecode<[u8; 20]> for Row<'a> {
     }
 }
 
-impl<'a> FieldDecode<Option<[u8; 20]>> for Row<'a> {
+impl FieldDecode<Option<[u8; 20]>> for Row<'_> {
     fn field_decode(&self, index: usize) -> Result<Option<[u8; 20]>, rusqlite::Error> {
         let mbytes = self.get::<_, Option<Vec<u8>>>(index)?;
         let mbytes_sized = mbytes.map(|bytes| {
@@ -85,7 +85,7 @@ impl<'a> FieldDecode<Option<[u8; 20]>> for Row<'a> {
                 )
             })
         });
-        Ok(invert(mbytes_sized)?)
+        invert(mbytes_sized)
     }
 }
 

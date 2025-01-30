@@ -27,7 +27,7 @@ pub trait DatabaseHeaders {
     /// Iterate all stored headers and call a closure for them
     fn load_block_headers<F>(&self, body: F) -> Result<(), Error>
     where
-        F: FnMut(HeaderRecord) -> ();
+        F: FnMut(HeaderRecord);
 
     /// Stores the header in the database, doesn't mark it as longest chain, but checks that we have the parent in place.
     fn store_block_header(&mut self, header: Header) -> Result<(), Error> {
@@ -79,7 +79,7 @@ impl DatabaseHeaders for Connection {
 
     fn load_block_headers<F>(&self, mut body: F) -> Result<(), Error>
     where
-        F: FnMut(HeaderRecord) -> (),
+        F: FnMut(HeaderRecord),
     {
         let query = "SELECT height, raw, in_longest FROM headers";
         let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
@@ -162,7 +162,7 @@ impl DatabaseHeaders for Connection {
                 params.push(Value::Blob(
                     header.block_hash().as_raw_hash().as_byte_array().to_vec(),
                 ));
-                params.push(Value::Integer(*height as i64));
+                params.push(Value::Integer(*height));
                 params.push(Value::Blob(
                     prev_hash.as_raw_hash().as_byte_array().to_vec(),
                 ));
