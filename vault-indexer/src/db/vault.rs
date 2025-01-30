@@ -7,7 +7,7 @@ use log::trace;
 use rusqlite::{named_params, types::Type, Connection, Row};
 
 use super::error::Error;
-use crate::vault::{VaultAction, VaultTx};
+use crate::vault::{VaultAction, VaultId, VaultTx};
 
 /// Operations with vault in database
 pub trait DatabaseVault {
@@ -18,7 +18,7 @@ pub trait DatabaseVault {
         block_hash: BlockHash,
         height: u32,
         raw_tx: &bitcoin::Transaction,
-    ) -> Result<(), Error>;
+    ) -> Result<VaultId, Error>;
 
     /// Find vault by transaction that is related to it
     fn find_vault_by_tx(&self, txid: Txid) -> Result<Option<Txid>, Error>;
@@ -34,7 +34,7 @@ impl DatabaseVault for Connection {
         block_hash: BlockHash,
         height: u32,
         raw_tx: &bitcoin::Transaction,
-    ) -> Result<(), Error> {
+    ) -> Result<VaultId, Error> {
         let vault_id = find_parent_vault(self, &tx, &raw_tx)?;
         if tx.action == VaultAction::Open {
             create_vault(self, &tx)?;
@@ -42,7 +42,7 @@ impl DatabaseVault for Connection {
             update_vault(self, &tx)?;
         }
         insert_vault_tx_raw(self, tx, vault_id, block_hash, height, raw_tx)?;
-        Ok(())
+        Ok(vault_id)
     }
 
     /// Find vault by transaction that is related to it

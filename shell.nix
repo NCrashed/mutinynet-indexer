@@ -1,7 +1,8 @@
 with import ./nix/pkgs.nix {
   overlays = [ (import ./nix/overlay.nix) ];
 };
-stdenv.mkDerivation rec {
+let merged-openssl = symlinkJoin { name = "merged-openssl"; paths = [ openssl.out openssl.dev ]; };
+in stdenv.mkDerivation rec {
   name = "rust-env";
   env = buildEnv { name = name; paths = buildInputs; };
 
@@ -9,5 +10,9 @@ stdenv.mkDerivation rec {
     bitcoind-mutiny
     rustup
     sqlite
+    openssl
   ];
+  shellHook = ''
+    export OPENSSL_DIR="${merged-openssl}" 
+  '';
 }

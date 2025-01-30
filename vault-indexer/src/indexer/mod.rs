@@ -3,13 +3,13 @@ use bitcoin::{
     p2p::{message::NetworkMessage, message_blockdata::Inventory},
     Block,
 };
-use bus::Bus;
+use bus::{Bus, BusReader};
 use core::{
     result::Result,
     sync::atomic::{self, AtomicBool, AtomicU32},
     time::Duration,
 };
-use event::{Event, EVENTS_CAPACITY};
+use event::{Event, NewTransactionEvent, EVENTS_CAPACITY};
 use log::*;
 pub use network::Network;
 use rusqlite::Connection;
@@ -54,6 +54,8 @@ pub enum Error {
     HeadersCacheLock,
     #[error("Failed to lock on database, poisoned")]
     DatabaseLock,
+    #[error("Failed to lock on events bus, poisoned")]
+    EventsBusLock,
 }
 
 /// The possible state of connection to bitcoin node we have.
@@ -78,6 +80,7 @@ pub struct Indexer {
     batch_size: u32,
     remote_height: Arc<AtomicU32>,
     rescan: bool,
+    events_bus: Arc<Mutex<Bus<Event>>>,
 }
 
 impl Indexer {
@@ -114,16 +117,29 @@ impl Indexer {
         Ok(self.start_height)
     }
 
+    /// Get access to internal database (for making queries)
+    pub fn get_database(&self) -> Arc<Mutex<Connection>> {
+        self.database.clone()
+    }
+
+    /// Make a events receiver to listen events about the indexing
+    pub fn add_event_reader(&self) -> Result<BusReader<Event>, Error> {
+        let mut events_bus = self.events_bus.lock().map_err(|_| Error::EventsBusLock)?;
+        Ok(events_bus.add_rx())
+    }
+
     /// Executes the internal threads (connection to the node, indexing worker) and awaits
     /// of their termination. Intended to be run in separate thread.
     pub fn run(&self) -> Result<(), Error> {
         // Make events fan-in
         let (events_sender, events_receiver) = sync_channel(EVENTS_CAPACITY);
         // Make events fan-out
-        let mut events_bus = Bus::new(EVENTS_CAPACITY);
+        let mut events_bus = self.events_bus.lock().map_err(|_| Error::EventsBusLock)?;
         // Register all readers of events in advance
         let node_receiver = events_bus.add_rx();
         let mut main_receiver = events_bus.add_rx();
+        // Don't hold lock
+        drop(events_bus);
         // Make a flag to terminate threads after the main runner exits
         let stop_flag = Arc::new(AtomicBool::new(false));
 
@@ -134,10 +150,15 @@ impl Indexer {
         }
 
         // Connect fain-in and fan-out through dispatcher thread
-        thread::spawn(move || {
-            // Will end as soon as events receiver is dropped
-            for event in events_receiver.iter() {
-                events_bus.broadcast(event);
+        thread::spawn({
+            let events_bus = self.events_bus.clone();
+            move || -> Result<(), Error> {
+                // Will end as soon as events receiver is dropped
+                for event in events_receiver.iter() {
+                    let mut events_bus = events_bus.lock().map_err(|_| Error::EventsBusLock)?;
+                    events_bus.broadcast(event);
+                }
+                Ok(())
             }
         });
 
@@ -391,7 +412,7 @@ impl Indexer {
                 Err(err) => {
                     if !err.is_definetely_not_vault() {
                         error!("Got transaction {}, that possible vault related, but we failed to parse with: {}", tx.compute_wtxid(), err);
-                        panic!("Stop here for debug");
+                        //panic!("Stop here for debug");
                     }
                 }
                 Ok(vtx) => {
@@ -399,7 +420,22 @@ impl Indexer {
                     debug!("Found a vault transaction: {:#?}", vtx);
 
                     let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
-                    conn.store_vault_tx(&vtx, block_hash, height, &tx)?;
+                    match conn.store_vault_tx(&vtx, block_hash, height, &tx) {
+                        Err(e) => {
+                            error!("Failed to store vault tx {} from block {block_hash} at height {height}, reason: {}", vtx.txid, e);
+                            //panic!("Stop here for debug");
+                        }
+                        Ok(vault_id) => {
+                            let mut events_bus = self.events_bus.lock().map_err(|_| Error::EventsBusLock)?;
+                            events_bus.broadcast(Event::NewTransaction(NewTransactionEvent {
+                                vault_id, 
+                                vault_tx: vtx.clone(),
+                                vessel_tx: tx.clone(),
+                                block_hash,
+                                height,
+                            }));
+                        }
+                    }
                 }
             }
         }
@@ -489,6 +525,7 @@ impl IndexerBuilder {
             batch_size: (self.batch_size_builder)(),
             remote_height: Arc::new(AtomicU32::new(0)),
             rescan,
+            events_bus: Arc::new(Mutex::new(Bus::new(EVENTS_CAPACITY))),
         })
     }
 }

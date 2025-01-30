@@ -102,6 +102,9 @@ pub const LIQUIDATION_HASH_LEN: usize = 20;
 /// Liquidation hash stored in byte array
 pub type LiquidationHash = [u8; LIQUIDATION_HASH_LEN];
 
+/// Vault id is a opening transaction ID
+pub type VaultId = Txid;
+
 /// Contains metadata about the vault transaction
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VaultTx {
