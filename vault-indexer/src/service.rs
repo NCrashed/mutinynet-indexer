@@ -85,6 +85,26 @@ pub fn start_websocket_server(indexer: Arc<Indexer>, bind_addr: &str) -> Result<
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+pub enum TimeSpan {
+    Hour, 
+    Day, 
+    Week,
+    Month,
+}
+
+impl TimeSpan {
+    /// Get amounts of seconds for the time span
+    pub fn time_width(&self) -> u32 {
+        match self {
+            TimeSpan::Hour => 3600,
+            TimeSpan::Day => 3600 * 24,
+            TimeSpan::Week => 3600 * 24 * 7,
+            TimeSpan::Month => 3600 * 24 * 7 * 30,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "method")]
 pub enum Request {
@@ -101,13 +121,11 @@ pub enum Request {
     },
     #[serde(rename = "action_history")]
     ActionHistory {
-        timestamp_start: Option<u32>,
-        timestamp_end: Option<u32>,
+        timespan: Option<TimeSpan>,
     },
     #[serde(rename = "overall_volume")]
     OverallVolume {
-        timestamp_start: Option<u32>,
-        timestamp_end: Option<u32>,
+        timespan: Option<TimeSpan>,
     },
 }
 
@@ -306,13 +324,11 @@ fn process_request(
             handler_vault_history(network, database, txid, timestamp_start, timestamp_end)
         }
         Request::ActionHistory {
-            timestamp_start,
-            timestamp_end,
-        } => handler_action_history(database, timestamp_start, timestamp_end),
+            timespan,
+        } => handler_action_history(database, timespan),
         Request::OverallVolume {
-            timestamp_start,
-            timestamp_end,
-        } => handler_overall_volume(database, timestamp_start, timestamp_end),
+            timespan,
+        } => handler_overall_volume(database, timespan),
     }
 }
 
@@ -365,16 +381,14 @@ fn handler_vault_history(
 
 fn handler_action_history(
     database: Arc<Mutex<Connection>>,
-    timestamp_start: Option<u32>,
-    timestamp_end: Option<u32>,
+    timespan: Option<TimeSpan>,
 ) -> Result<Response, Error> {
     Ok(Response::Dummy)
 }
 
 fn handler_overall_volume(
     database: Arc<Mutex<Connection>>,
-    timestamp_start: Option<u32>,
-    timestamp_end: Option<u32>,
+    timespan: Option<TimeSpan>,
 ) -> Result<Response, Error> {
     Ok(Response::Dummy)
 }

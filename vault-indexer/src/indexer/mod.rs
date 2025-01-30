@@ -407,7 +407,7 @@ impl Indexer {
     /// transactions in database.
     fn process_block(&self, block: Block, height: u32) -> Result<(), Error> {
         let block_hash = block.block_hash();
-        for tx in block.txdata {
+        for (i, tx) in block.txdata.into_iter().enumerate() {
             match VaultTx::from_tx(&tx) {
                 Err(err) => {
                     if !err.is_definetely_not_vault() {
@@ -420,7 +420,7 @@ impl Indexer {
                     debug!("Found a vault transaction: {:#?}", vtx);
 
                     let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
-                    match conn.store_vault_tx(&vtx, block_hash, height, &tx) {
+                    match conn.store_vault_tx(&vtx, block_hash, i, height, &tx) {
                         Err(e) => {
                             error!("Failed to store vault tx {} from block {block_hash} at height {height}, reason: {}", vtx.txid, e);
                             //panic!("Stop here for debug");

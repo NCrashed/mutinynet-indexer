@@ -6,7 +6,7 @@ use log::trace;
 use rusqlite::{named_params, Connection};
 
 use super::super::error::Error;
-use crate::vault::{VaultAction, VaultId, VaultTx};
+use crate::vault::{UnitAmount, VaultAction, VaultId, VaultTx};
 use super::super::loaders::*;
 
 /// Operations with vault in database
@@ -16,6 +16,7 @@ pub trait DatabaseVault {
         &self,
         tx: &VaultTx,
         block_hash: BlockHash,
+        block_pos: usize,
         height: u32,
         raw_tx: &bitcoin::Transaction,
     ) -> Result<VaultId, Error>;
@@ -32,6 +33,7 @@ impl DatabaseVault for Connection {
         &self,
         tx: &VaultTx,
         block_hash: BlockHash,
+        block_pos: usize,
         height: u32,
         raw_tx: &bitcoin::Transaction,
     ) -> Result<VaultId, Error> {
@@ -41,7 +43,8 @@ impl DatabaseVault for Connection {
         } else {
             update_vault(self, &tx)?;
         }
-        insert_vault_tx_raw(self, tx, vault_id, block_hash, height, raw_tx)?;
+        let prev_balance = find_prev_balance(self, vault_id, block_pos, height)?;
+        insert_vault_tx_raw(self, tx, vault_id, block_hash, block_pos, height, raw_tx, prev_balance)?;
         Ok(vault_id)
     }
 
@@ -82,14 +85,17 @@ fn insert_vault_tx_raw(
     tx: &VaultTx,
     vault_id: Txid,
     block_hash: BlockHash,
+    block_pos: usize,
     height: u32,
     raw_tx: &bitcoin::Transaction,
+    prev_balance: Option<UnitAmount>,
 ) -> Result<(), Error> {
     trace!("Inserting vault transaction in db");
     let query = r#"
         INSERT INTO transactions VALUES(
             :txid,
             :output,
+            :block_pos,
             :vault_txid,
             :version,
             :action,
@@ -101,7 +107,9 @@ fn insert_vault_tx_raw(
             :block_hash,
             :height,
             :in_longest,
-            :raw_tx)
+            :raw_tx, 
+            :units_volume,
+            :btc_volume)
     "#;
 
     let mut tx_bytes = vec![];
@@ -109,11 +117,14 @@ fn insert_vault_tx_raw(
         .consensus_encode(&mut Cursor::new(&mut tx_bytes))
         .map_err(Error::EncodeBitcoinTransaction)?;
 
+    let units_volume = prev_balance.map_or(tx.balance as i32, |old_balance| tx.balance as i32 - old_balance as i32);
+    let btc_volume = tx.assume_btc_volume(raw_tx)?;
     let mut statement = conn.prepare_cached(query).map_err(Error::PrepareQuery)?;
     statement
         .execute(named_params! {
             ":txid": (&tx.txid).field_encode(),
             ":output": tx.output as i64,
+            ":block_pos": block_pos as i64,
             ":vault_txid": (&vault_id).field_encode(),
             ":version": tx.version.to_string(),
             ":action": tx.action.to_string(),
@@ -126,6 +137,8 @@ fn insert_vault_tx_raw(
             ":height": height as i64,
             ":in_longest": 1, // assume that we don't scan forks
             ":raw_tx": tx_bytes,
+            ":units_volume": units_volume,
+            ":btc_volume": btc_volume,
         })
         .map_err(Error::ExecuteQuery)?;
     Ok(())
@@ -214,5 +227,41 @@ fn find_parent_vault(
             .find_vault_by_tx(parent_txid)?
             .ok_or(Error::UnknownVaultTx(vtx.txid))?;
         Ok(vault_id)
+    }
+}
+
+fn find_prev_balance(conn: &Connection, vault_id: Txid, block_pos: usize, height: u32) -> Result<Option<UnitAmount>, Error> {
+    let query = r#"
+        SELECT
+            height,
+            block_pos,
+            balance
+        FROM transactions
+        WHERE
+            vault_txid = :vault_id
+            AND (
+                height < :height
+                OR (height = :height AND block_pos < :block_pos)
+            )
+        ORDER BY height DESC, block_pos DESC
+        LIMIT 1
+    "#;
+
+    let mut statement = conn.prepare_cached(query).map_err(Error::PrepareQuery)?;
+    let mut rows = statement
+        .query_map(named_params! {
+            ":vault_id": (&vault_id).field_encode(),
+            ":height": height, 
+            ":block_pos": block_pos,
+        }, |row| {
+            let balance = row.get(2)?;
+            Ok(balance)
+        })
+        .map_err(Error::ExecuteQuery)?;
+
+    if let Some(row) = rows.next() {
+        Ok(Some(row.map_err(Error::FetchRow)?))
+    } else {
+        Ok(None)
     }
 }

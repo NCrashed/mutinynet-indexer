@@ -77,6 +77,7 @@ pub fn initialize_db<P: AsRef<Path>>(
             CREATE TABLE IF NOT EXISTS transactions(
                 txid                BLOB(32) NOT NULL PRIMARY KEY, -- Assume that we cannot have two vaults operations in single tx
                 output              INTEGER NOT NULL,
+                block_pos           INTEGER NOT NULL, -- Ordering in block is important for state update order
                 vault_txid          BLOB(32) NOT NULL,
                 -- Fields extracted from transaction
                 version             TEXT NOT NULL,
@@ -91,7 +92,9 @@ pub fn initialize_db<P: AsRef<Path>>(
                 height              INTEGER NOT NULL,
                 in_longest          INTEGER NOT NULL,
                 raw_tx              BLOB NOT NULL,
-
+                units_volume        INTEGER NOT NULL, -- Assume that balance delta is units volume
+                btc_volume          INTEGER NOT NULL, -- Assume that BTC volume is sum of other outputs minus change (non tap outputs) and custody counts only for opening transaction
+                
                 FOREIGN KEY (vault_txid) REFERENCES vaults(open_txid),
                 FOREIGN KEY (block_hash) REFERENCES headers(block_hash)
             );

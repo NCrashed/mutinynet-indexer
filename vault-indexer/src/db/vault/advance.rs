@@ -1,10 +1,12 @@
+use core::unimplemented;
+
 use bitcoin::{BlockHash, Txid};
 use rusqlite::{named_params, Connection, Row};
 
 use super::super::Error;
 use crate::{
     db::loaders::{FieldDecode, FieldEncode},
-    vault::{VaultId, VaultTx},
+    vault::{UnitAmount, VaultAction, VaultId, VaultTx},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,7 +14,18 @@ pub struct VaultTxMeta {
     pub vault_id: VaultId,
     pub vault_tx: VaultTx,
     pub block_hash: BlockHash,
+    pub block_pos: usize,
     pub height: u32,
+    pub units_volume: i32, 
+    pub btc_volume: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionAggItem {
+    pub timestamp_start: u32, 
+    pub timestamp_end: u32, 
+    pub unit_volume: UnitAmount,
+    pub btc_volume: u64,
 }
 
 /// Operations with vault in database for some complex queries required for the
@@ -30,6 +43,12 @@ pub trait DatabaseVaultAdvance {
         start: Option<u32>,
         end: Option<u32>,
     ) -> Result<Vec<VaultTxMeta>, Error>;
+
+    fn action_aggregated(
+        &self,
+        action: VaultAction,
+        timespan: u32, 
+    ) -> Result<Vec<ActionAggItem>, Error>;
 }
 
 impl DatabaseVaultAdvance for Connection {
@@ -79,23 +98,34 @@ impl DatabaseVaultAdvance for Connection {
             .map(|row| row.map_err(Error::FetchRow))
             .collect::<Result<Vec<_>, Error>>()?)
     }
+
+    fn action_aggregated(
+        &self,
+        action: VaultAction,
+        timespan: u32, 
+    ) -> Result<Vec<ActionAggItem>, Error> {
+        unimplemented!()
+    }
 }
 
 fn load_vault_meta(row: &Row<'_>) -> Result<VaultTxMeta, rusqlite::Error> {
     Ok(VaultTxMeta {
-        vault_id: row.field_decode(2)?,
+        vault_id: row.field_decode(3)?,
         vault_tx: VaultTx {
             txid: row.field_decode(0)?,
             output: row.get(1)?,
-            version: row.field_decode(3)?,
-            action: row.field_decode(4)?,
-            balance: row.get(5)?,
-            oracle_price: row.get(6)?,
-            oracle_timestamp: row.get(7)?,
-            liquidation_price: row.get(8)?,
-            liquidation_hash: row.field_decode(9)?,
+            version: row.field_decode(4)?,
+            action: row.field_decode(5)?,
+            balance: row.get(6)?,
+            oracle_price: row.get(7)?,
+            oracle_timestamp: row.get(8)?,
+            liquidation_price: row.get(9)?,
+            liquidation_hash: row.field_decode(10)?,
         },
-        block_hash: row.field_decode(10)?,
-        height: row.get(11)?,
+        block_hash: row.field_decode(11)?,
+        block_pos: row.get(2)?,
+        height: row.get(12)?,
+        units_volume: row.get(13)?, 
+        btc_volume: row.get(14)?,
     })
 }

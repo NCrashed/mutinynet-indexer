@@ -1,12 +1,9 @@
 use bitcoin::{
-    consensus::Decodable,
-    opcodes::all::{OP_PUSHBYTES_14, OP_PUSHBYTES_38, OP_PUSHNUM_8, OP_RETURN},
-    Script, Transaction,
+    consensus::Decodable, opcodes::all::{OP_PUSHBYTES_14, OP_PUSHBYTES_38, OP_PUSHNUM_8, OP_RETURN}, BlockHash, Script, Transaction, TxOut
 };
 use core::{assert_eq, fmt::Display, matches, str::FromStr};
 use log::*;
 use std::io::Cursor;
-
 pub use bitcoin::Txid;
 use thiserror::Error;
 
@@ -343,6 +340,48 @@ impl VaultTx {
             liquidation_price,
             liquidation_hash,
         })
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum AssumeVolumeErr {
+    #[error("Transaction {0} has no custody output")]
+    NoOpenOutput(Txid),
+    #[error("Transaction {0} has no outputs for deposit amount")]
+    NoDepositOutput(Txid),
+    #[error("Transaction {0} has no outputs for withdraw amount")]
+    NoWithdrawOutput(Txid),
+}
+
+impl VaultTx {
+    /// Try assume BTC volume of the operation. We consider first output as custody that 
+    /// counts if
+    pub fn assume_btc_volume(&self, tx: &Transaction) -> Result<u64, AssumeVolumeErr> {
+        match self.action {
+            VaultAction::Open => {
+                // First output and second outputs look like a UTXO connectors, so assume 3rd one is usually a custody
+                let custody_output: &TxOut = tx.output.get(2).ok_or(AssumeVolumeErr::NoOpenOutput(tx.compute_txid()))?;
+                Ok(custody_output.value.to_sat())
+            }
+            VaultAction::Deposit => {
+                // First output looks like the deposit amount to custody (same script)
+                let deposit_output: &TxOut = tx.output.get(0).ok_or(AssumeVolumeErr::NoDepositOutput(tx.compute_txid()))?;
+                Ok(deposit_output.value.to_sat())
+            }
+            VaultAction::Withdraw => {
+                // Second output looks like withdraw (first one is recreated custody)
+                let withdraw_output: &TxOut = tx.output.get(1).ok_or(AssumeVolumeErr::NoWithdrawOutput(tx.compute_txid()))?;
+                Ok(withdraw_output.value.to_sat())
+            }
+            VaultAction::Borrow => {
+                // Borrow by design shouldn't touch BTC balance
+                Ok(0)
+            }
+            VaultAction::Repay => {
+                // Repay by design shouldn't touch BTC balance
+                Ok(0)
+            }
+        }
     }
 }
 
