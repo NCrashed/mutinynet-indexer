@@ -1,6 +1,6 @@
 use super::super::Error;
 use crate::{
-    db::loaders::{FieldDecode, FieldEncode},
+    db::loaders::{invert, FieldDecode, FieldEncode},
     vault::{UnitAmount, VaultAction, VaultId, VaultTx},
 };
 use bitcoin::{BlockHash, Txid};
@@ -46,6 +46,10 @@ pub trait DatabaseVaultAdvance {
         action: VaultAction,
         timespan: u32,
     ) -> Result<Vec<ActionAggItem>, Error>;
+
+    fn overall_volume(
+        &self, 
+    ) -> Result<(u64, UnitAmount), Error>;
 }
 
 impl DatabaseVaultAdvance for Connection {
@@ -130,6 +134,31 @@ impl DatabaseVaultAdvance for Connection {
         Ok(rows
             .map(|row| row.map_err(Error::FetchRow))
             .collect::<Result<Vec<_>, Error>>()?)
+    }
+
+    fn overall_volume(
+        &self, 
+    ) -> Result<(u64, UnitAmount), Error> {
+        let query = r#"
+            SELECT 
+                SUM(btc_volume)        AS total_btc_volume,
+                SUM(abs(units_volume)) AS total_units_volume
+            FROM transactions;
+        "#;
+        let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
+        let mut rows = statement
+            .query_map(
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?.abs() as u64,
+                        row.get::<_, i32>(1)?.abs() as u32,
+                    ))
+                },
+            )
+            .map_err(Error::ExecuteQuery)?;
+        let res = invert(rows.next().map(|row| row.map_err(Error::FetchRow)))?;
+        Ok(res.unwrap_or((0, 0)))
     }
 }
 

@@ -53,7 +53,9 @@ To test the endpoints one can use `./run-client` script that uses [websocat]() t
 {"method": "action_history", "action":"Repay", "timespan":"Month"}
 ```
 * `overall_volume`: Return aggregated volume metrics (BTC and units) over a specified time span.
-
+```json
+{"method": "overall_volume"}
+```
 
 ## Repo structure
 

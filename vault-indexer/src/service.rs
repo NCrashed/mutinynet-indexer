@@ -126,7 +126,13 @@ pub enum Request {
         timespan: Option<TimeSpan>,
     },
     #[serde(rename = "overall_volume")]
-    OverallVolume { timespan: Option<TimeSpan> },
+    OverallVolume { },
+}
+
+#[derive(Debug, Serialize)]
+pub struct OverallVolume {
+    btc_volume: u64,
+    unit_volume: u32,
 }
 
 #[derive(Serialize)]
@@ -135,7 +141,7 @@ pub enum Response {
     AllHistory(Vec<VaultTxInfo>),
     VaultHistory(Vec<VaultTxInfo>),
     ActionHistory(Vec<ActionAggItem>),
-    Dummy,
+    OveallVolume(OverallVolume),
 }
 
 #[derive(Serialize)]
@@ -327,7 +333,7 @@ fn process_request(
         Request::ActionHistory { action, timespan } => {
             handler_action_history(database, action, timespan)
         }
-        Request::OverallVolume { timespan } => handler_overall_volume(database, timespan),
+        Request::OverallVolume { } => handler_overall_volume(database),
     }
 }
 
@@ -392,8 +398,9 @@ fn handler_action_history(
 }
 
 fn handler_overall_volume(
-    database: Arc<Mutex<Connection>>,
-    timespan: Option<TimeSpan>,
+    database: Arc<Mutex<Connection>>
 ) -> Result<Response, Error> {
-    Ok(Response::Dummy)
+    let conn = database.lock().map_err(|_| Error::DbLock)?;
+    let (btc_volume, unit_volume) = conn.overall_volume()?;
+    Ok(Response::OveallVolume(OverallVolume { btc_volume, unit_volume }))
 }

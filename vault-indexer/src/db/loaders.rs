@@ -121,6 +121,6 @@ impl FieldEncode for VaultAction {
 }
 
 // That is called traverse in Haskell
-fn invert<T, E>(x: Option<Result<T, E>>) -> Result<Option<T>, E> {
+pub fn invert<T, E>(x: Option<Result<T, E>>) -> Result<Option<T>, E> {
     x.map_or(Ok(None), |v| v.map(Some))
 }
