@@ -200,7 +200,9 @@ fn client_handler(
                             new_tx.block_hash,
                             new_tx.height,
                         );
-                        let encoded_info = match serde_json::to_string_pretty(&Response::NewTranscation(info)) {
+                        let encoded_info = match serde_json::to_string_pretty(
+                            &Response::NewTranscation(info),
+                        ) {
                             Err(e) => {
                                 error!("Failed to encode tx {} for vault {} for client {addr}, reason: {}", new_tx.vault_tx.txid, new_tx.vault_id, e);
                                 continue;
