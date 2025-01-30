@@ -325,7 +325,7 @@ impl Indexer {
                 conn.get_scanned_height()?
             };
 
-            let msg: NetworkMessage = cache.make_get_blocks(scanned_height, self.batch_size)?;
+            let msg: NetworkMessage = cache.make_get_blocks(scanned_height + 1, self.batch_size)?;
             events_sender.send(Event::OutcomingMessage(msg))?;
             // Remember how much blocks we expect
             let actual_batch = self.batch_size.min(height - scanned_height);
