@@ -72,7 +72,8 @@ pub fn initialize_db<P: AsRef<Path>>(
                 oracle_timestamp    INTEGER NOT NULL,
                 liquidation_price   INTEGER,
                 liquidation_hash    BLOB(32),
-                custody             INTEGER NOT NULL
+                custody             INTEGER NOT NULL,
+                last_tx             BLOB(32) NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS transactions(
@@ -93,11 +94,14 @@ pub fn initialize_db<P: AsRef<Path>>(
                 height              INTEGER NOT NULL,
                 in_longest          INTEGER NOT NULL,
                 raw_tx              BLOB NOT NULL,
-                units_volume        INTEGER NOT NULL, -- Assume that balance delta is units volume
+                btc_custody         INTEGER NOT NULL,
+                unit_volume         INTEGER NOT NULL, -- Assume that balance delta is units volume
                 btc_volume          INTEGER NOT NULL, -- Assume that BTC volume is sum of other outputs minus change (non tap outputs) and custody counts only for opening transaction
-                
+                prev_tx             BLOB(32),
+
                 FOREIGN KEY (vault_txid) REFERENCES vaults(open_txid),
-                FOREIGN KEY (block_hash) REFERENCES headers(block_hash)
+                FOREIGN KEY (block_hash) REFERENCES headers(block_hash),
+                FOREIGN KEY (prev_tx) REFERENCES transactions(txid)
             );
 
             CREATE INDEX IF NOT EXISTS idx_transactions_vault_id ON transactions(vault_txid);

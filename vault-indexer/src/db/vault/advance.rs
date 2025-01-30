@@ -1,22 +1,11 @@
-use super::super::Error;
+use super::{super::Error, load_vault_meta, VaultTxMeta};
 use crate::{
-    db::loaders::{invert, FieldDecode, FieldEncode},
-    vault::{UnitAmount, VaultAction, VaultId, VaultTx},
+    db::loaders::{invert, FieldEncode},
+    vault::{UnitAmount, VaultAction},
 };
-use bitcoin::{BlockHash, Txid};
-use rusqlite::{named_params, Connection, Row};
+use bitcoin::Txid;
+use rusqlite::{named_params, Connection};
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VaultTxMeta {
-    pub vault_id: VaultId,
-    pub vault_tx: VaultTx,
-    pub block_hash: BlockHash,
-    pub block_pos: usize,
-    pub height: u32,
-    pub units_volume: i32,
-    pub btc_volume: i64,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionAggItem {
@@ -106,7 +95,7 @@ impl DatabaseVaultAdvance for Connection {
         let query = r#"
             SELECT 
                 (oracle_timestamp / :span) * :span AS time_bucket,
-                SUM(abs(units_volume)) AS total_units_volume,
+                SUM(abs(unit_volume)) AS total_unit_volume,
                 SUM(abs(btc_volume))   AS total_btc_volume
             FROM transactions
             WHERE action = :action
@@ -138,7 +127,7 @@ impl DatabaseVaultAdvance for Connection {
         let query = r#"
             SELECT 
                 SUM(abs(btc_volume))   AS total_btc_volume,
-                SUM(abs(units_volume)) AS total_units_volume
+                SUM(abs(unit_volume)) AS total_unit_volume
             FROM transactions;
         "#;
         let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
@@ -153,26 +142,4 @@ impl DatabaseVaultAdvance for Connection {
         let res = invert(rows.next().map(|row| row.map_err(Error::FetchRow)))?;
         Ok(res.unwrap_or((0, 0)))
     }
-}
-
-fn load_vault_meta(row: &Row<'_>) -> Result<VaultTxMeta, rusqlite::Error> {
-    Ok(VaultTxMeta {
-        vault_id: row.field_decode(3)?,
-        vault_tx: VaultTx {
-            txid: row.field_decode(0)?,
-            output: row.get(1)?,
-            version: row.field_decode(4)?,
-            action: row.field_decode(5)?,
-            balance: row.get(6)?,
-            oracle_price: row.get(7)?,
-            oracle_timestamp: row.get(8)?,
-            liquidation_price: row.get(9)?,
-            liquidation_hash: row.field_decode(10)?,
-        },
-        block_hash: row.field_decode(11)?,
-        block_pos: row.get(2)?,
-        height: row.get(12)?,
-        units_volume: row.get(15)?,
-        btc_volume: row.get(16)?,
-    })
 }

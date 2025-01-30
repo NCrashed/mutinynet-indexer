@@ -1,5 +1,5 @@
 use crate::db::vault::advance::DatabaseVaultAdvance;
-use crate::db::vault::ActionAggItem;
+use crate::db::vault::{ActionAggItem, VaultTxMeta};
 use crate::vault::{OraclePrice, UnitAmount, VaultAction, VaultId, VaultTx};
 use crate::Network;
 use crate::{indexer::event::Event, Indexer};
@@ -164,6 +164,10 @@ pub struct VaultTxInfo {
     pub block_hash: String,
     pub height: u32,
     pub tx_url: String,
+    pub btc_custody: u64,
+    pub unit_volume: i32,
+    pub btc_volume: i64,
+    pub prev_tx: String,
 }
 
 impl VaultTxInfo {
@@ -173,6 +177,10 @@ impl VaultTxInfo {
         vault_tx: &VaultTx,
         block_hash: BlockHash,
         height: u32,
+        btc_custody: u64,
+        unit_volume: i32,
+        btc_volume: i64,
+        prev_tx: Txid,
     ) -> Self {
         VaultTxInfo {
             vault_id: vault_id.to_string(),
@@ -188,7 +196,25 @@ impl VaultTxInfo {
             block_hash: block_hash.to_string(),
             height,
             tx_url: network.explorer_url(vault_tx.txid),
+            btc_custody,
+            unit_volume,
+            btc_volume,
+            prev_tx: network.explorer_url(prev_tx),
         }
+    }
+
+    pub fn from_db_metainfo(network: Network, meta: &VaultTxMeta) -> Self {
+        VaultTxInfo::new(
+            network,
+            meta.vault_id,
+            &meta.vault_tx,
+            meta.block_hash,
+            meta.height,
+            meta.btc_custody,
+            meta.unit_volume,
+            meta.btc_volume,
+            meta.prev_tx,
+        )
     }
 }
 
@@ -218,13 +244,7 @@ fn client_handler(
                             new_tx.vault_tx.txid,
                             new_tx.vault_id
                         );
-                        let info = VaultTxInfo::new(
-                            network,
-                            new_tx.vault_id,
-                            &new_tx.vault_tx,
-                            new_tx.block_hash,
-                            new_tx.height,
-                        );
+                        let info = VaultTxInfo::from_db_metainfo(network, &new_tx);
                         let encoded_info = match serde_json::to_string_pretty(
                             &Response::NewTranscation(info),
                         ) {
@@ -347,15 +367,7 @@ fn handler_all_history(
     let metas = conn.range_history_all(timestamp_start, timestamp_end)?;
     let infos = metas
         .into_iter()
-        .map(|meta| {
-            VaultTxInfo::new(
-                network,
-                meta.vault_id,
-                &meta.vault_tx,
-                meta.block_hash,
-                meta.height,
-            )
-        })
+        .map(|meta| VaultTxInfo::from_db_metainfo(network, &meta))
         .collect();
     Ok(Response::AllHistory(infos))
 }
@@ -371,15 +383,7 @@ fn handler_vault_history(
     let metas = conn.range_history_vault(vault_open_txid, timestamp_start, timestamp_end)?;
     let infos = metas
         .into_iter()
-        .map(|meta| {
-            VaultTxInfo::new(
-                network,
-                meta.vault_id,
-                &meta.vault_tx,
-                meta.block_hash,
-                meta.height,
-            )
-        })
+        .map(|meta| VaultTxInfo::from_db_metainfo(network, &meta))
         .collect();
     Ok(Response::VaultHistory(infos))
 }

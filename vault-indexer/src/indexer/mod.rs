@@ -9,7 +9,7 @@ use core::{
     sync::atomic::{self, AtomicBool, AtomicU32},
     time::Duration,
 };
-use event::{Event, NewTransactionEvent, EVENTS_CAPACITY};
+use event::{Event, EVENTS_CAPACITY};
 use log::*;
 pub use network::Network;
 use rusqlite::Connection;
@@ -425,16 +425,10 @@ impl Indexer {
                             error!("Failed to store vault tx {} from block {block_hash} at height {height}, reason: {}", vtx.txid, e);
                             //panic!("Stop here for debug");
                         }
-                        Ok(vault_id) => {
+                        Ok(meta) => {
                             let mut events_bus =
                                 self.events_bus.lock().map_err(|_| Error::EventsBusLock)?;
-                            events_bus.broadcast(Event::NewTransaction(NewTransactionEvent {
-                                vault_id,
-                                vault_tx: vtx.clone(),
-                                vessel_tx: tx.clone(),
-                                block_hash,
-                                height,
-                            }));
+                            events_bus.broadcast(Event::NewTransaction(meta));
                         }
                     }
                 }

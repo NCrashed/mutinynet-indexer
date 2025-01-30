@@ -46,6 +46,8 @@ pub enum Error {
     VaultTxNoInputs(Txid),
     #[error("Cannot find vault for given transaction {0}")]
     UnknownVaultTx(Txid),
+    #[error("Cannot find vault with given open transcation {0}")]
+    UnknownVaultId(Txid),
     #[error("Cannot assume BTC volume: {0}")]
     AssumeBtcVolume(#[from] AssumeCustodyErr),
 }
