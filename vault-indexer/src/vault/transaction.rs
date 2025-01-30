@@ -354,12 +354,12 @@ pub enum AssumeVolumeErr {
 }
 
 impl VaultTx {
-    /// Try assume BTC volume of the operation. We consider first output as custody that 
-    /// counts if
+    /// Try assume BTC volume of the operation. The prediction is not robust, but works for 
+    /// every transaction at the current mutinynet.
     pub fn assume_btc_volume(&self, tx: &Transaction) -> Result<u64, AssumeVolumeErr> {
         match self.action {
             VaultAction::Open => {
-                // First output and second outputs look like a UTXO connectors, so assume 3rd one is usually a custody
+                // First output and second outputs look like a UTXO connectors or inscriptions, so assume 3rd one is usually a custody
                 let custody_output: &TxOut = tx.output.get(2).ok_or(AssumeVolumeErr::NoOpenOutput(tx.compute_txid()))?;
                 Ok(custody_output.value.to_sat())
             }
