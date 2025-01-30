@@ -1,8 +1,9 @@
 #![feature(mpmc_channel)]
 
 mod cache;
-mod db;
+pub mod db;
 pub mod indexer;
+pub mod service;
 mod vault;
 
 pub use indexer::*;

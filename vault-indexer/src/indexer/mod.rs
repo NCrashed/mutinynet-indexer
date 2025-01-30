@@ -32,8 +32,8 @@ use crate::{
     vault::VaultTx,
 };
 
-mod event;
-mod network;
+pub mod event;
+pub mod network;
 mod node;
 
 /// All kind of errors the indexer can produce
@@ -426,9 +426,10 @@ impl Indexer {
                             //panic!("Stop here for debug");
                         }
                         Ok(vault_id) => {
-                            let mut events_bus = self.events_bus.lock().map_err(|_| Error::EventsBusLock)?;
+                            let mut events_bus =
+                                self.events_bus.lock().map_err(|_| Error::EventsBusLock)?;
                             events_bus.broadcast(Event::NewTransaction(NewTransactionEvent {
-                                vault_id, 
+                                vault_id,
                                 vault_tx: vtx.clone(),
                                 vessel_tx: tx.clone(),
                                 block_hash,

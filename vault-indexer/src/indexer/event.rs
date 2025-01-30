@@ -8,7 +8,7 @@ pub const EVENTS_CAPACITY: usize = 32000;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewTransactionEvent {
     pub vault_id: VaultId,
-    pub vault_tx: VaultTx, 
+    pub vault_tx: VaultTx,
     pub vessel_tx: bitcoin::Transaction,
     pub block_hash: BlockHash,
     pub height: u32,
