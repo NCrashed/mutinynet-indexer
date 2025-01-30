@@ -255,7 +255,7 @@ fn client_handler(
                     .send(Message::text(encoded_response))
                     .map_err(|_| Error::SendingBus)?;
             }
-            OwnedMessage::Binary(b) => {
+            OwnedMessage::Binary(_) => {
                 sender
                     .send(Message::text("Expected JSON request"))
                     .map_err(|_| Error::SendingBus)?;

@@ -433,19 +433,11 @@ impl HeaderChain {
         self.root.block_hash()
     }
 
-    pub fn root(&self) -> Header {
-        self.root
-    }
-
     pub fn tip_hash(&self) -> BlockHash {
         self.trunk_for
             .last()
             .map(|h| h.block_hash())
             .unwrap_or(self.root_hash())
-    }
-
-    pub fn tip(&self) -> Header {
-        self.trunk_for.last().cloned().unwrap_or(self.root)
     }
 
     pub fn headers(&self) -> impl Iterator<Item = Header> + use<'_> {
