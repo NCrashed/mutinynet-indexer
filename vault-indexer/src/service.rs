@@ -131,8 +131,8 @@ pub enum Request {
 
 #[derive(Debug, Serialize)]
 pub struct OverallVolume {
-    btc_volume: u64,
-    unit_volume: u32,
+    btc_volume: i64,
+    unit_volume: i32,
 }
 
 #[derive(Serialize)]
@@ -141,7 +141,7 @@ pub enum Response {
     AllHistory(Vec<VaultTxInfo>),
     VaultHistory(Vec<VaultTxInfo>),
     ActionHistory(Vec<ActionAggItem>),
-    OveallVolume(OverallVolume),
+    OverallVolume(OverallVolume),
 }
 
 #[derive(Serialize)]
@@ -245,9 +245,9 @@ fn client_handler(
                             new_tx.vault_id
                         );
                         let info = VaultTxInfo::from_db_metainfo(network, &new_tx);
-                        let encoded_info = match serde_json::to_string_pretty(
-                            &Response::NewTranscation(info),
-                        ) {
+                        let encoded_info = match serde_json::to_string(&Response::NewTranscation(
+                            info,
+                        )) {
                             Err(e) => {
                                 error!("Failed to encode tx {} for vault {} for client {addr}, reason: {}", new_tx.vault_tx.txid, new_tx.vault_id, e);
                                 continue;
@@ -404,7 +404,7 @@ fn handler_action_history(
 fn handler_overall_volume(database: Arc<Mutex<Connection>>) -> Result<Response, Error> {
     let conn = database.lock().map_err(|_| Error::DbLock)?;
     let (btc_volume, unit_volume) = conn.overall_volume()?;
-    Ok(Response::OveallVolume(OverallVolume {
+    Ok(Response::OverallVolume(OverallVolume {
         btc_volume,
         unit_volume,
     }))

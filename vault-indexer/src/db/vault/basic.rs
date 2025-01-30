@@ -170,9 +170,17 @@ fn insert_vault_tx_raw(
         .consensus_encode(&mut Cursor::new(&mut tx_bytes))
         .map_err(Error::EncodeBitcoinTransaction)?;
 
-    let unit_volume = tx.balance as i32 - prev_balance as i32;
+    let unit_volume = if tx.action == VaultAction::Open {
+        tx.balance as i32
+    } else {
+        tx.balance as i32 - prev_balance as i32
+    };
     let cur_custody = tx.assume_custody_value(&raw_tx)?;
-    let btc_volume = cur_custody as i64 - prev_custody as i64;
+    let btc_volume: i64 = if tx.action == VaultAction::Open {
+        cur_custody as i64
+    } else {
+        cur_custody as i64 - prev_custody as i64
+    };
     let mut statement = conn.prepare_cached(query).map_err(Error::PrepareQuery)?;
     statement
         .execute(named_params! {
