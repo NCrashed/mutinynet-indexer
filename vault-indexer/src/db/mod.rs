@@ -71,7 +71,8 @@ pub fn initialize_db<P: AsRef<Path>>(
                 oracle_price        INTEGER NOT NULL,
                 oracle_timestamp    INTEGER NOT NULL,
                 liquidation_price   INTEGER,
-                liquidation_hash    BLOB(32)
+                liquidation_hash    BLOB(32),
+                custody             INTEGER NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS transactions(

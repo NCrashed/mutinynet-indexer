@@ -419,7 +419,7 @@ impl Indexer {
                     info!("New vault {} transaction: {}", vtx.action, vtx.txid);
                     debug!("Found a vault transaction: {:#?}", vtx);
 
-                    let conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
+                    let mut conn = self.database.lock().map_err(|_| Error::DatabaseLock)?;
                     match conn.store_vault_tx(&vtx, block_hash, i, height, &tx) {
                         Err(e) => {
                             error!("Failed to store vault tx {} from block {block_hash} at height {height}, reason: {}", vtx.txid, e);

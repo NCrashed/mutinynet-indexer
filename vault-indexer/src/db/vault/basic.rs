@@ -13,7 +13,7 @@ use crate::vault::{UnitAmount, VaultAction, VaultId, VaultTx};
 pub trait DatabaseVault {
     /// Get stored newtork type in the database
     fn store_vault_tx(
-        &self,
+        &mut self,
         tx: &VaultTx,
         block_hash: BlockHash,
         block_pos: usize,
@@ -30,7 +30,7 @@ pub trait DatabaseVault {
 
 impl DatabaseVault for Connection {
     fn store_vault_tx(
-        &self,
+        &mut self,
         tx: &VaultTx,
         block_hash: BlockHash,
         block_pos: usize,
@@ -38,22 +38,31 @@ impl DatabaseVault for Connection {
         raw_tx: &bitcoin::Transaction,
     ) -> Result<VaultId, Error> {
         let vault_id = find_parent_vault(self, &tx, &raw_tx)?;
-        if tx.action == VaultAction::Open {
-            create_vault(self, &tx)?;
-        } else {
-            update_vault(self, &tx)?;
-        }
+        let prev_custody = get_vault_custody_amount(self, vault_id)?;
         let prev_balance = find_prev_balance(self, vault_id, block_pos, height)?;
+
+        let conn_tx = self.transaction().map_err(Error::StartTransaction)?;
+
+        if tx.action == VaultAction::Open {
+            create_vault(&conn_tx, &tx, raw_tx)?;
+        } else {
+            update_vault(&conn_tx, &tx, raw_tx)?;
+        }
+
         insert_vault_tx_raw(
-            self,
+            &conn_tx,
             tx,
             vault_id,
             block_hash,
             block_pos,
             height,
             raw_tx,
+            prev_custody,
             prev_balance,
         )?;
+
+        conn_tx.commit().map_err(Error::CommitTransaction)?;
+
         Ok(vault_id)
     }
 
@@ -97,6 +106,7 @@ fn insert_vault_tx_raw(
     block_pos: usize,
     height: u32,
     raw_tx: &bitcoin::Transaction,
+    prev_custody: Option<u64>,
     prev_balance: Option<UnitAmount>,
 ) -> Result<(), Error> {
     trace!("Inserting vault transaction in db");
@@ -129,7 +139,8 @@ fn insert_vault_tx_raw(
     let units_volume = prev_balance.map_or(tx.balance as i32, |old_balance| {
         tx.balance as i32 - old_balance as i32
     });
-    let btc_volume = tx.assume_btc_volume(raw_tx)?;
+    let cur_custody = tx.assume_custody_value(&raw_tx)?;
+    let btc_volume = cur_custody as i64 - prev_custody.unwrap_or(0) as i64;
     let mut statement = conn.prepare_cached(query).map_err(Error::PrepareQuery)?;
     statement
         .execute(named_params! {
@@ -155,7 +166,11 @@ fn insert_vault_tx_raw(
     Ok(())
 }
 
-fn create_vault(conn: &Connection, tx: &VaultTx) -> Result<(), Error> {
+fn create_vault(
+    conn: &Connection,
+    tx: &VaultTx,
+    raw_tx: &bitcoin::Transaction,
+) -> Result<(), Error> {
     trace!("Inserting new vault in db");
     assert_eq!(
         tx.action,
@@ -171,7 +186,8 @@ fn create_vault(conn: &Connection, tx: &VaultTx) -> Result<(), Error> {
                 :oracle_price,
                 :oracle_timestamp,
                 :liquidation_price,
-                :liquidation_hash
+                :liquidation_hash,
+                :custody
             )
         "#;
     let mut statement = conn.prepare_cached(query).map_err(Error::PrepareQuery)?;
@@ -183,18 +199,24 @@ fn create_vault(conn: &Connection, tx: &VaultTx) -> Result<(), Error> {
             ":oracle_price": tx.oracle_price as i64,
             ":oracle_timestamp": tx.oracle_timestamp as i64,
             ":liquidation_price": tx.liquidation_price,
-            ":liquidation_hash": tx.liquidation_hash
+            ":liquidation_hash": tx.liquidation_hash,
+            ":custody": tx.assume_btc_volume(raw_tx, 0)?,
         })
         .map_err(Error::ExecuteQuery)?;
     Ok(())
 }
 
-fn update_vault(conn: &Connection, tx: &VaultTx) -> Result<(), Error> {
+fn update_vault(
+    conn: &Connection,
+    tx: &VaultTx,
+    raw_tx: &bitcoin::Transaction,
+) -> Result<(), Error> {
     trace!("Updating vault in db");
     assert!(
         tx.action != VaultAction::Open,
         "Update of vault is only possible with non opening tx"
     );
+    let next_custody = tx.assume_custody_value(raw_tx)?;
 
     let query = r#"
             UPDATE vaults SET 
@@ -202,7 +224,8 @@ fn update_vault(conn: &Connection, tx: &VaultTx) -> Result<(), Error> {
                 oracle_price = :oracle_price,
                 oracle_timestamp = :oracle_timestamp,
                 liquidation_price = :liquidation_price,
-                liquidation_hash = :liquidation_hash
+                liquidation_hash = :liquidation_hash,
+                custody = :custody
             WHERE open_txid = :vault_id
         "#;
     let mut statement = conn.prepare_cached(query).map_err(Error::PrepareQuery)?;
@@ -213,7 +236,8 @@ fn update_vault(conn: &Connection, tx: &VaultTx) -> Result<(), Error> {
             ":oracle_price": tx.oracle_price as i64,
             ":oracle_timestamp": tx.oracle_timestamp as i64,
             ":liquidation_price": tx.liquidation_price,
-            ":liquidation_hash": tx.liquidation_hash
+            ":liquidation_hash": tx.liquidation_hash,
+            ":custody": next_custody,
         })
         .map_err(Error::ExecuteQuery)?;
     Ok(())
@@ -238,6 +262,30 @@ fn find_parent_vault(
             .find_vault_by_tx(parent_txid)?
             .ok_or(Error::UnknownVaultTx(vtx.txid))?;
         Ok(vault_id)
+    }
+}
+
+fn get_vault_custody_amount(conn: &Connection, vault_id: Txid) -> Result<Option<u64>, Error> {
+    let query = r#"
+        SELECT custody FROM vaults WHERE open_txid = :vault_id LIMIT 1
+    "#;
+    let mut statement = conn.prepare_cached(query).map_err(Error::PrepareQuery)?;
+    let mut rows = statement
+        .query_map(
+            named_params! {
+                ":vault_id": (&vault_id).field_encode(),
+            },
+            |row| {
+                let custody = row.get(0)?;
+                Ok(custody)
+            },
+        )
+        .map_err(Error::ExecuteQuery)?;
+
+    if let Some(row) = rows.next() {
+        Ok(Some(row.map_err(Error::FetchRow)?))
+    } else {
+        Ok(None)
     }
 }
 

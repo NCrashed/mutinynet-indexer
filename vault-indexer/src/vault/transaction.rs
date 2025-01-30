@@ -347,43 +347,71 @@ impl VaultTx {
 }
 
 #[derive(Debug, Error)]
-pub enum AssumeVolumeErr {
-    #[error("Transaction {0} has no custody output")]
+pub enum AssumeCustodyErr {
+    #[error("Open transaction {0} has no custody output")]
     NoOpenOutput(Txid),
-    #[error("Transaction {0} has no outputs for deposit amount")]
+    #[error("Deposit transaction {0} has no outputs for custody")]
     NoDepositOutput(Txid),
-    #[error("Transaction {0} has no outputs for withdraw amount")]
+    #[error("Withdraw transaction {0} has no outputs for custody")]
     NoWithdrawOutput(Txid),
 }
 
 impl VaultTx {
-    /// Try assume BTC volume of the operation. The prediction is not robust, but works for
-    /// every transaction at the current mutinynet.
-    pub fn assume_btc_volume(&self, tx: &Transaction) -> Result<u64, AssumeVolumeErr> {
+    /// Try assume BTC amount held inside the custody.
+    pub fn assume_custody_value(&self, tx: &Transaction) -> Result<u64, AssumeCustodyErr> {
         match self.action {
             VaultAction::Open => {
                 // First output and second outputs look like a UTXO connectors or inscriptions, so assume 3rd one is usually a custody
                 let custody_output: &TxOut = tx
                     .output
                     .get(2)
-                    .ok_or(AssumeVolumeErr::NoOpenOutput(tx.compute_txid()))?;
+                    .ok_or(AssumeCustodyErr::NoOpenOutput(tx.compute_txid()))?;
                 Ok(custody_output.value.to_sat())
             }
-            VaultAction::Deposit => {
-                // First output looks like the deposit amount to custody (same script)
-                let deposit_output: &TxOut = tx
+            _ => {
+                // First output looks like volume of custody (same script)
+                let cur_custody: &TxOut = tx
                     .output
                     .get(0)
-                    .ok_or(AssumeVolumeErr::NoDepositOutput(tx.compute_txid()))?;
-                Ok(deposit_output.value.to_sat())
+                    .ok_or(AssumeCustodyErr::NoDepositOutput(tx.compute_txid()))?;
+
+                Ok(cur_custody.value.to_sat())
+            }
+        }
+    }
+
+    /// Try assume BTC volume of the operation. The prediction is not robust, but works for
+    /// every transaction at the current mutinynet.
+    pub fn assume_btc_volume(
+        &self,
+        tx: &Transaction,
+        prev_custody: u64,
+    ) -> Result<i64, AssumeCustodyErr> {
+        match self.action {
+            VaultAction::Open => {
+                // First output and second outputs look like a UTXO connectors or inscriptions, so assume 3rd one is usually a custody
+                let custody_output: &TxOut = tx
+                    .output
+                    .get(2)
+                    .ok_or(AssumeCustodyErr::NoOpenOutput(tx.compute_txid()))?;
+                Ok(custody_output.value.to_sat() as i64)
+            }
+            VaultAction::Deposit => {
+                // First output looks like volume of custody (same script), so subtract the previous custody value
+                let cur_custody: &TxOut = tx
+                    .output
+                    .get(0)
+                    .ok_or(AssumeCustodyErr::NoDepositOutput(tx.compute_txid()))?;
+
+                Ok(cur_custody.value.to_sat() as i64 - prev_custody as i64)
             }
             VaultAction::Withdraw => {
-                // Second output looks like withdraw (first one is recreated custody)
-                let withdraw_output: &TxOut = tx
+                // First output looks like volume of custody (same script), so subtract the previous custody value
+                let cur_custody: &TxOut = tx
                     .output
-                    .get(1)
-                    .ok_or(AssumeVolumeErr::NoWithdrawOutput(tx.compute_txid()))?;
-                Ok(withdraw_output.value.to_sat())
+                    .get(0)
+                    .ok_or(AssumeCustodyErr::NoWithdrawOutput(tx.compute_txid()))?;
+                Ok(cur_custody.value.to_sat() as i64 - prev_custody as i64)
             }
             VaultAction::Borrow => {
                 // Borrow by design shouldn't touch BTC balance

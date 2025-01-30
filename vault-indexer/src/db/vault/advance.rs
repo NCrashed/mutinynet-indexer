@@ -47,9 +47,7 @@ pub trait DatabaseVaultAdvance {
         timespan: u32,
     ) -> Result<Vec<ActionAggItem>, Error>;
 
-    fn overall_volume(
-        &self, 
-    ) -> Result<(u64, UnitAmount), Error>;
+    fn overall_volume(&self) -> Result<(u64, UnitAmount), Error>;
 }
 
 impl DatabaseVaultAdvance for Connection {
@@ -108,8 +106,8 @@ impl DatabaseVaultAdvance for Connection {
         let query = r#"
             SELECT 
                 (oracle_timestamp / :span) * :span AS time_bucket,
-                SUM(units_volume) AS total_units_volume,
-                SUM(btc_volume)   AS total_btc_volume
+                SUM(abs(units_volume)) AS total_units_volume,
+                SUM(abs(btc_volume))   AS total_btc_volume
             FROM transactions
             WHERE action = :action
             GROUP BY time_bucket
@@ -125,8 +123,8 @@ impl DatabaseVaultAdvance for Connection {
                 |row| {
                     Ok(ActionAggItem {
                         timestamp_start: row.get(0)?,
-                        unit_volume: row.get::<_, i32>(1)?.abs() as u32,
-                        btc_volume: row.get::<_, i64>(2)?.abs() as u64,
+                        unit_volume: row.get::<_, i32>(1)? as u32,
+                        btc_volume: row.get::<_, i64>(2)? as u64,
                     })
                 },
             )
@@ -136,26 +134,21 @@ impl DatabaseVaultAdvance for Connection {
             .collect::<Result<Vec<_>, Error>>()?)
     }
 
-    fn overall_volume(
-        &self, 
-    ) -> Result<(u64, UnitAmount), Error> {
+    fn overall_volume(&self) -> Result<(u64, UnitAmount), Error> {
         let query = r#"
             SELECT 
-                SUM(btc_volume)        AS total_btc_volume,
+                SUM(abs(btc_volume))   AS total_btc_volume,
                 SUM(abs(units_volume)) AS total_units_volume
             FROM transactions;
         "#;
         let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
         let mut rows = statement
-            .query_map(
-                [],
-                |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?.abs() as u64,
-                        row.get::<_, i32>(1)?.abs() as u32,
-                    ))
-                },
-            )
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?.abs() as u64,
+                    row.get::<_, i32>(1)?.abs() as u32,
+                ))
+            })
             .map_err(Error::ExecuteQuery)?;
         let res = invert(rows.next().map(|row| row.map_err(Error::FetchRow)))?;
         Ok(res.unwrap_or((0, 0)))
@@ -179,7 +172,7 @@ fn load_vault_meta(row: &Row<'_>) -> Result<VaultTxMeta, rusqlite::Error> {
         block_hash: row.field_decode(11)?,
         block_pos: row.get(2)?,
         height: row.get(12)?,
-        units_volume: row.get(13)?,
-        btc_volume: row.get(14)?,
+        units_volume: row.get(15)?,
+        btc_volume: row.get(16)?,
     })
 }

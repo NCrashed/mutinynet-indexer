@@ -1,7 +1,7 @@
 use bitcoin::{BlockHash, Txid};
 use thiserror::Error;
 
-use crate::{vault::AssumeVolumeErr, Network};
+use crate::{vault::AssumeCustodyErr, Network};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -47,5 +47,5 @@ pub enum Error {
     #[error("Cannot find vault for given transaction {0}")]
     UnknownVaultTx(Txid),
     #[error("Cannot assume BTC volume: {0}")]
-    AssumeBtcVolume(#[from] AssumeVolumeErr),
+    AssumeBtcVolume(#[from] AssumeCustodyErr),
 }
