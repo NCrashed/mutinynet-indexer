@@ -3,7 +3,7 @@ use core::{fmt::Display, str::FromStr};
 use std::io::Cursor;
 use thiserror::Error;
 
-use bitcoin::{block::Header, consensus::Decodable, constants::genesis_block, p2p::Magic};
+use bitcoin::{block::Header, consensus::Decodable, constants::genesis_block, p2p::Magic, Txid};
 
 // Extract from: btc-cli getblockheader 00000008819873e925422c1ff0f99f7cc9bbb232af63a077a480a3633bee1ef6 false
 const MUTINY_SIGNET_GENESIS_HEADER: [u8; 80] = [
@@ -108,6 +108,21 @@ impl Network {
                 Header::consensus_decode(&mut Cursor::new(MUTINY_SIGNET_GENESIS_HEADER))
                     .expect("Mutinynet genesis block decode")
             }
+        }
+    }
+
+    pub fn explorer_url(self, txid: Txid) -> String {
+        format!("{}/{}", self.explorer_base_url(), txid)
+    }
+
+    pub fn explorer_base_url(self) -> &'static str {
+        match self {
+            Network::Bitcoin => "https://mempool.space/tx",
+            Network::Testnet => "https://mempool.space/testnet/tx",
+            Network::Testnet4 => "https://mempool.space/testnet4/tx",
+            Network::Signet => "https://mempool.space/signet/tx",
+            Network::Regtest => "http://127.0.0.1:4080/tx",
+            Network::Mutinynet => "https://mutinynet.com/tx",
         }
     }
 }
