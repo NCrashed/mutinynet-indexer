@@ -1,5 +1,16 @@
 # Mutiny signet indexer
 
+## Demo Assumptions
+
+- The syncing process **DOES** include fork detection and a proper reorganization algorithm to track the chain with the largest accumulated PoW. However, the demo **DOESN’T** deactivate any previously scanned transactions that are later dropped. That aspect is beyond the scope of this demo.
+
+- I have made some bold assumptions about the structure of vault transactions. For instance:
+  - The open transaction always uses the 3rd output for locking collateral, while other transaction types use the 1st output for collateral.
+  - Collateral is always placed in the transaction’s first input.
+  - Each transaction includes only one vault operation.
+
+- The estimation of UNIT token amounts is based on balance changes. After extensive testing, I’ve found that this approach doesn’t fully reflect reality. A better solution would involve inspecting outputs that include inscriptions, which is well beyond the scope of this demo.
+
 ## Hacking process
 
 You will need the [Nix](nixos.org) package manager in your `PATH`. Other system deps and toolchains will be fetched by the nix.
