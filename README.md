@@ -8,8 +8,9 @@
   - The open transaction always uses the 3rd output for locking collateral, while other transaction types use the 1st output for collateral.
   - Collateral is always placed in the transaction’s first input.
   - Each transaction includes only one vault operation.
+  - UTXO connector is placed in 2nd slot of inputs and leads to the phase 1 transaction with UNIT runestone.
 
-- The estimation of UNIT token amounts is based on balance changes. After extensive testing, I’ve found that this approach doesn’t fully reflect reality. A better solution would involve inspecting outputs that include inscriptions, which is well beyond the scope of this demo.
+- The indexer also search for any UNIT related transactions and saves them to provide proper UNIT volumes for Vault transactions. 
 
 ## Hacking process
 
