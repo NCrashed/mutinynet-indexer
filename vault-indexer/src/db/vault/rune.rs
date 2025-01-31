@@ -53,7 +53,7 @@ impl DatabaseRune for Connection {
         let mut rows = statement
             .query_map(
                 named_params! {
-                    ":vault_id": (&txid).field_encode(),
+                    ":txid": (&txid).field_encode(),
                 },
                 |row| {
                     let transaction = row.field_decode(1)?;

@@ -2,7 +2,7 @@ pub use bitcoin::Txid;
 use bitcoin::{
     consensus::Decodable,
     opcodes::all::{OP_PUSHBYTES_14, OP_PUSHBYTES_38, OP_PUSHNUM_8, OP_RETURN},
-    Script, Transaction, TxOut,
+    Script, Transaction, TxIn, TxOut,
 };
 use core::{assert_eq, fmt::Display, matches, str::FromStr};
 use log::*;
@@ -74,6 +74,15 @@ impl VaultAction {
             VaultAction::Withdraw => "withdraw",
             VaultAction::Borrow => "borrow",
             VaultAction::Repay => "repay",
+        }
+    }
+
+    // Which operations we consider as increase of volume or decrease
+    pub fn unit_volume_sign(self) -> i32 {
+        match self {
+            VaultAction::Repay => -1,
+            VaultAction::Open | VaultAction::Borrow => 1,
+            _ => 1,
         }
     }
 }
@@ -368,7 +377,10 @@ impl VaultTx {
                     .ok_or(AssumeCustodyErr::Open(tx.compute_txid()))?;
                 Ok(custody_output.value.to_sat())
             }
-            _ => {
+            VaultAction::Deposit
+            | VaultAction::Withdraw
+            | VaultAction::Borrow
+            | VaultAction::Repay => {
                 // First output looks like volume of custody (same script)
                 let cur_custody: &TxOut = tx
                     .output
@@ -377,6 +389,31 @@ impl VaultTx {
 
                 Ok(cur_custody.value.to_sat())
             }
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum AssumeUnitTxErr {
+    #[error("There is no UTXO connector in the inputs (should be at index {CONNECTOR_INPUT_POS}) in {0} vault tx: {1}")]
+    Connector(VaultAction, Txid),
+}
+
+// Assume that is always 2nd one
+const CONNECTOR_INPUT_POS: usize = 1;
+
+impl VaultTx {
+    /// Try to assume which input is related to the parent phase 1 transaction that contains UNIT amounts
+    pub fn assume_parent_unit_tx(&self, tx: &Transaction) -> Result<Option<Txid>, AssumeUnitTxErr> {
+        match self.action {
+            VaultAction::Open | VaultAction::Borrow | VaultAction::Repay => {
+                let connector_input: &TxIn = tx
+                    .input
+                    .get(CONNECTOR_INPUT_POS)
+                    .ok_or(AssumeUnitTxErr::Connector(self.action, tx.compute_txid()))?;
+                Ok(Some(connector_input.previous_output.txid))
+            }
+            VaultAction::Deposit | VaultAction::Withdraw => Ok(None),
         }
     }
 }

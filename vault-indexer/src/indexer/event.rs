@@ -8,9 +8,9 @@ pub const EVENTS_CAPACITY: usize = 32000;
 #[derive(Debug, Clone)]
 pub struct NewUnitTx {
     pub utx: UnitTransaction,
-    pub block_hash: BlockHash, 
-    pub block_pos: usize, 
-    pub height: u32, 
+    pub block_hash: BlockHash,
+    pub block_pos: usize,
+    pub height: u32,
 }
 
 /// Events that are passed between parts of the system

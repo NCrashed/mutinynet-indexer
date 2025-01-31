@@ -14,8 +14,8 @@ pub const UNIT_RUNE_ID: RuneId = RuneId {
 
 /// Parsed info from runestone with edicts about UNIT token
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnitTransaction{
-    pub txid: Txid, 
+pub struct UnitTransaction {
+    pub txid: Txid,
     pub unit_amount: UnitAmount,
 }
 
@@ -42,23 +42,23 @@ impl UnitTransaction {
         match artifact {
             Artifact::Runestone(runestone) => {
                 let mut unit_amount = 0;
+                let mut units_encoutered = false;
                 for edict in runestone.edicts.iter() {
                     if edict.id == UNIT_RUNE_ID {
                         unit_amount += edict.amount;
+                        units_encoutered = true;
                     }
                 }
-                if unit_amount == 0 {
+                if !units_encoutered {
                     Err(Error::DontHaveUnitRune(txid, runestone))
                 } else {
                     Ok(UnitTransaction {
-                        txid, 
+                        txid,
                         unit_amount: unit_amount as u32,
                     })
                 }
-            } 
-            Artifact::Cenotaph(cenotaph) => {
-                Err(Error::Cenotaph(txid, cenotaph))
             }
+            Artifact::Cenotaph(cenotaph) => Err(Error::Cenotaph(txid, cenotaph)),
         }
     }
 }

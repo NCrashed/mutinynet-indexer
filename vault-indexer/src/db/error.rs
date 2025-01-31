@@ -1,7 +1,10 @@
 use bitcoin::{BlockHash, Txid};
 use thiserror::Error;
 
-use crate::{vault::AssumeCustodyErr, Network};
+use crate::{
+    vault::{AssumeCustodyErr, AssumeUnitTxErr},
+    Network,
+};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -52,6 +55,8 @@ pub enum Error {
     UnknownUnitTx(Txid),
     #[error("Cannot assume BTC volume: {0}")]
     AssumeBtcVolume(#[from] AssumeCustodyErr),
+    #[error("Cannot asssume parent UNIT transaction: {0}")]
+    AssumeUnitTx(#[from] AssumeUnitTxErr),
     #[error("Failed to decode Bitcoin transaction from: {0:x?}, reason: {1}")]
     TransactionDecode(Vec<u8>, bitcoin::consensus::encode::Error),
 }

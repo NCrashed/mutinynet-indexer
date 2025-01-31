@@ -1,13 +1,13 @@
 use std::io::Cursor;
 
+use super::super::error::Error;
+use super::super::loaders::*;
+use crate::db::vault::rune::DatabaseRune;
+use crate::vault::{VaultAction, VaultId, VaultTx};
 use bitcoin::consensus::Encodable;
 use bitcoin::{BlockHash, Txid};
 use log::trace;
 use rusqlite::{named_params, Connection, Row};
-
-use super::super::error::Error;
-use super::super::loaders::*;
-use crate::vault::{UnitAmount, VaultAction, VaultId, VaultTx};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultTxMeta {
@@ -56,20 +56,20 @@ impl DatabaseVault for Connection {
         let conn_tx = self.transaction().map_err(Error::StartTransaction)?;
 
         // Fetch custody and balance infromation to properly save updates in metainfo
-        let (btc_custody, prev_custody, prev_balance, prev_tx) = if tx.action == VaultAction::Open {
+        let (btc_custody, prev_custody, prev_tx) = if tx.action == VaultAction::Open {
             let btc_custody = create_vault(&conn_tx, tx, raw_tx)?;
             trace!("Get vault information for freshly created");
-            let (_, prev_balance, prev_tx) = get_vault_chaining_info(&conn_tx, vault_id)?;
-            (btc_custody, btc_custody, prev_balance, prev_tx) // Prev custody and current are the same for new one
+            let (_, _, prev_tx) = get_vault_chaining_info(&conn_tx, vault_id)?;
+            (btc_custody, btc_custody, prev_tx) // Prev custody and current are the same for new one
         } else {
             trace!("Get vault information");
-            let (prev_custody, prev_balance, prev_tx) =
-                get_vault_chaining_info(&conn_tx, vault_id)?;
+            let (prev_custody, _, prev_tx) = get_vault_chaining_info(&conn_tx, vault_id)?;
             let btc_custody = update_vault(&conn_tx, vault_id, tx, raw_tx)?;
-            (btc_custody, prev_custody, prev_balance, prev_tx)
+            (btc_custody, prev_custody, prev_tx)
         };
 
-        let (unit_volume, btc_volume) = insert_vault_tx_raw(
+        let unit_volume = get_unit_volume(&conn_tx, tx, raw_tx)?;
+        let btc_volume = insert_vault_tx_raw(
             &conn_tx,
             tx,
             vault_id,
@@ -78,7 +78,7 @@ impl DatabaseVault for Connection {
             height,
             raw_tx,
             prev_custody,
-            prev_balance,
+            unit_volume,
             prev_tx,
         )?;
 
@@ -139,9 +139,9 @@ fn insert_vault_tx_raw(
     height: u32,
     raw_tx: &bitcoin::Transaction,
     prev_custody: u64,
-    prev_balance: UnitAmount,
+    unit_volume: i32,
     prev_tx: Txid,
-) -> Result<(i32, i64), Error> {
+) -> Result<i64, Error> {
     trace!("Inserting vault transaction in db");
     let query = r#"
         INSERT INTO transactions VALUES(
@@ -171,11 +171,6 @@ fn insert_vault_tx_raw(
         .consensus_encode(&mut Cursor::new(&mut tx_bytes))
         .map_err(Error::EncodeBitcoinTransaction)?;
 
-    let unit_volume = if tx.action == VaultAction::Open {
-        tx.balance as i32
-    } else {
-        tx.balance as i32 - prev_balance as i32
-    };
     let cur_custody = tx.assume_custody_value(raw_tx)?;
     let btc_volume: i64 = if tx.action == VaultAction::Open {
         cur_custody as i64
@@ -206,7 +201,20 @@ fn insert_vault_tx_raw(
             ":prev_tx": (&prev_tx).field_encode(),
         })
         .map_err(Error::ExecuteQuery)?;
-    Ok((unit_volume, btc_volume))
+    Ok(btc_volume)
+}
+
+fn get_unit_volume(
+    conn: &Connection,
+    tx: &VaultTx,
+    raw_tx: &bitcoin::Transaction,
+) -> Result<i32, Error> {
+    if let Some(unit_txid) = tx.assume_parent_unit_tx(&raw_tx)? {
+        let unit_tx = conn.load_unit_tx(unit_txid)?;
+        Ok(tx.action.unit_volume_sign() * (unit_tx.unit_amount as i32))
+    } else {
+        Ok(0)
+    }
 }
 
 fn create_vault(
