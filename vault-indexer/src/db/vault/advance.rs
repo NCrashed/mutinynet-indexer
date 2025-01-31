@@ -36,7 +36,7 @@ pub trait DatabaseVaultAdvance {
         timespan: u32,
     ) -> Result<Vec<ActionAggItem>, Error>;
 
-    fn overall_volume(&self) -> Result<(i64, i32), Error>;
+    fn overall_volume(&self) -> Result<(i64, i64), Error>;
 }
 
 impl DatabaseVaultAdvance for Connection {
@@ -120,16 +120,16 @@ impl DatabaseVaultAdvance for Connection {
             .collect::<Result<Vec<_>, Error>>()
     }
 
-    fn overall_volume(&self) -> Result<(i64, i32), Error> {
+    fn overall_volume(&self) -> Result<(i64, i64), Error> {
         let query = r#"
             SELECT 
-                SUM(btc_volume) AS total_btc_volume,
-                SUM(unit_volume) AS total_unit_volume
+                SUM(abs(btc_volume)) AS total_btc_volume,
+                SUM(abs(unit_volume)) AS total_unit_volume
             FROM transactions;
         "#;
         let mut statement = self.prepare_cached(query).map_err(Error::PrepareQuery)?;
         let mut rows = statement
-            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i32>(1)?)))
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
             .map_err(Error::ExecuteQuery)?;
         let res = invert(rows.next().map(|row| row.map_err(Error::FetchRow)))?;
         Ok(res.unwrap_or((0, 0)))

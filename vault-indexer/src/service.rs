@@ -132,7 +132,7 @@ pub enum Request {
 #[derive(Debug, Serialize)]
 pub struct OverallVolume {
     btc_volume: i64,
-    unit_volume: i32,
+    unit_volume: i64,
 }
 
 #[allow(clippy::large_enum_variant)]
