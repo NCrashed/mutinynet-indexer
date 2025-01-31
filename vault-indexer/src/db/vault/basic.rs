@@ -24,7 +24,7 @@ pub struct VaultTxMeta {
 
 /// Operations with vault in database
 pub trait DatabaseVault {
-    /// Get stored newtork type in the database
+    /// Save the vault related transaction to the SQlite
     fn store_vault_tx(
         &mut self,
         tx: &VaultTx,

@@ -1,9 +1,9 @@
-use core::assert_eq;
-use std::io::Cursor;
-use bitcoin::Transaction;
-use serial_test::serial;
-use ordinals::*; 
 use bitcoin::consensus::Decodable;
+use bitcoin::Transaction;
+use core::assert_eq;
+use ordinals::*;
+use serial_test::serial;
+use std::io::Cursor;
 
 use crate::vault::UNIT_RUNE_ID;
 
@@ -22,7 +22,9 @@ const BORROW_TX_PHASE1: &str = "0200000000010244326d9d5e8c337c1e678af55768b4c21b
 #[test]
 #[serial]
 fn parse_open_vault_edict() {
-    let tx = Transaction::consensus_decode(&mut Cursor::new(hex::decode(OPEN_VAULT_TX_PHASE1).unwrap())).unwrap();
+    let tx =
+        Transaction::consensus_decode(&mut Cursor::new(hex::decode(OPEN_VAULT_TX_PHASE1).unwrap()))
+            .unwrap();
     if let Artifact::Runestone(artifact) = Runestone::decipher(&tx).unwrap() {
         // println!("{:#?}", artifact);
         let edict = artifact.edicts[0];
@@ -36,7 +38,8 @@ fn parse_open_vault_edict() {
 #[test]
 #[serial]
 fn parse_repay_edict() {
-    let tx = Transaction::consensus_decode(&mut Cursor::new(hex::decode(REPAY_TX_PHASE1).unwrap())).unwrap();
+    let tx = Transaction::consensus_decode(&mut Cursor::new(hex::decode(REPAY_TX_PHASE1).unwrap()))
+        .unwrap();
     if let Artifact::Runestone(artifact) = Runestone::decipher(&tx).unwrap() {
         // println!("{:#?}", artifact);
         let edict = artifact.edicts[0];
@@ -50,7 +53,9 @@ fn parse_repay_edict() {
 #[test]
 #[serial]
 fn parse_borrow_edict() {
-    let tx = Transaction::consensus_decode(&mut Cursor::new(hex::decode(BORROW_TX_PHASE1).unwrap())).unwrap();
+    let tx =
+        Transaction::consensus_decode(&mut Cursor::new(hex::decode(BORROW_TX_PHASE1).unwrap()))
+            .unwrap();
     if let Artifact::Runestone(artifact) = Runestone::decipher(&tx).unwrap() {
         // println!("{:#?}", artifact);
         let edict = artifact.edicts[0];

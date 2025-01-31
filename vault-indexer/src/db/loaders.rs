@@ -1,9 +1,11 @@
 use super::Error;
 use crate::vault::{VaultAction, VaultVersion};
+use bitcoin::consensus::Decodable;
 use bitcoin::hashes::Hash;
-use bitcoin::{BlockHash, Txid};
+use bitcoin::{BlockHash, Transaction, Txid};
 use core::str::FromStr;
 use rusqlite::{types::Type, Row};
+use std::io::Cursor;
 
 // Helper that extracts T from field in row. Need separate trait as orphan
 // rools doesn't allow us define FromSql for external types.
@@ -86,6 +88,20 @@ impl FieldDecode<Option<[u8; 20]>> for Row<'_> {
             })
         });
         invert(mbytes_sized)
+    }
+}
+
+impl FieldDecode<Transaction> for Row<'_> {
+    fn field_decode(&self, index: usize) -> Result<Transaction, rusqlite::Error> {
+        let tx_bytes = self.get::<_, Vec<u8>>(index)?;
+        let tx = Transaction::consensus_decode(&mut Cursor::new(&tx_bytes)).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                index,
+                Type::Blob,
+                Box::new(Error::TransactionDecode(tx_bytes, e)),
+            )
+        })?;
+        Ok(tx)
     }
 }
 

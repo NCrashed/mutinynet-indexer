@@ -4,7 +4,7 @@ pub mod loaders;
 pub mod metadata;
 pub mod vault;
 
-use crate::db::vault::DatabaseVault;
+use crate::db::vault::{DatabaseRune, DatabaseVault};
 use crate::Network;
 pub use error::Error;
 pub use header::*;
@@ -110,6 +110,13 @@ pub fn initialize_db<P: AsRef<Path>>(
             CREATE INDEX IF NOT EXISTS idx_transactions_height_in_longest ON transactions(height, in_longest);
             CREATE INDEX IF NOT EXISTS idx_transactions_block_hash ON transactions(block_hash);
             CREATE INDEX IF NOT EXISTS idx_transactions_in_longest ON transactions(in_longest);
+
+            -- We will index all transactions which has runestones with UNIT rune
+            CREATE TABLE IF NOT EXISTS transactions_runes(
+                txid                BLOB(32) NOT NULL PRIMARY KEY,
+                raw_tx              BLOB NOT NULL,
+                unit_amount         INTEGER NOT NULL
+            );
         "#;
     connection
         .execute_batch(query)
@@ -140,6 +147,7 @@ pub fn initialize_db<P: AsRef<Path>>(
 
     if rescan {
         connection.drop_vaults()?;
+        connection.drop_unit_index()?;
         connection.set_scanned_height(start_height)?;
     }
 

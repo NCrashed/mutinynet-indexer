@@ -48,6 +48,10 @@ pub enum Error {
     UnknownVaultTx(Txid),
     #[error("Cannot find vault with given open transcation {0}")]
     UnknownVaultId(Txid),
+    #[error("Cannot find UNIT related transction with txid {0}")]
+    UnknownUnitTx(Txid),
     #[error("Cannot assume BTC volume: {0}")]
     AssumeBtcVolume(#[from] AssumeCustodyErr),
+    #[error("Failed to decode Bitcoin transaction from: {0:x?}, reason: {1}")]
+    TransactionDecode(Vec<u8>, bitcoin::consensus::encode::Error),
 }
