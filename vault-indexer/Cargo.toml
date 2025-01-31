@@ -19,9 +19,9 @@ websocket = { version = "0.27.1", default-features = false, features = [
     "sync-ssl",
 ] }
 hex = "0.4.3"
+ordinals = "0.0.15"
 
 [dev-dependencies]
-ordinals = "0.0.15"
 serial_test = "3.1.1"
 
 [lib]
