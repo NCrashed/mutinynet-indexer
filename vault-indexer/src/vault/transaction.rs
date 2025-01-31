@@ -289,13 +289,13 @@ impl VaultTx {
         let action = VaultAction::from_protocol(action_code)
             .ok_or(VaultParseError::WrongAction(action_code))?;
 
-        // Fetch units balance
-        let balance = instructions
-            .next_u32_be()
-            .ok_or(VaultParseError::MissingField(MissingVaultField::Balance))?;
+        // The new format (that is longer) has first price and timestamp, legacy has reverse.
+        let (balance, oracle_price, oracle_timestamp) = if is_new_format {
+            // Fetch units balance
+            let balance = instructions
+                .next_u32_be()
+                .ok_or(VaultParseError::MissingField(MissingVaultField::Balance))?;
 
-        // The new format (that is longer) has first price and timestamp, legacy has reverse
-        let (oracle_price, oracle_timestamp) = if is_new_format {
             // Fetch oracle price
             let oracle_price = instructions
                 .next_u32_be()
@@ -309,15 +309,8 @@ impl VaultTx {
                     .ok_or(VaultParseError::MissingField(
                         MissingVaultField::OracleTimestamp,
                     ))?;
-            (oracle_price, oracle_timestamp)
+            (balance, oracle_price, oracle_timestamp)
         } else {
-            // Fetch oracle timestamp
-            let oracle_timestamp =
-                instructions
-                    .next_u32_be()
-                    .ok_or(VaultParseError::MissingField(
-                        MissingVaultField::OracleTimestamp,
-                    ))?;
             // Fetch oracle price
             let oracle_price = instructions
                 .next_u32_be()
@@ -325,7 +318,20 @@ impl VaultTx {
                     MissingVaultField::OraclePrice,
                 ))?;
 
-            (oracle_price, oracle_timestamp)
+            // Fetch oracle timestamp
+            let oracle_timestamp =
+                instructions
+                    .next_u32_be()
+                    .ok_or(VaultParseError::MissingField(
+                        MissingVaultField::OracleTimestamp,
+                    ))?;
+
+            // Fetch units balance
+            let balance = instructions
+                .next_u32_be()
+                .ok_or(VaultParseError::MissingField(MissingVaultField::Balance))?;
+
+            (balance, oracle_price, oracle_timestamp)
         };
 
         // Fetch liqudation price
