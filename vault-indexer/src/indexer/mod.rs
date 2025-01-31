@@ -1,7 +1,8 @@
+use crate::db::vault::rune::DatabaseRune;
 use bitcoin::{
     block::Header,
     p2p::{message::NetworkMessage, message_blockdata::Inventory},
-    Block,
+    Block, BlockHash, Transaction,
 };
 use bus::{Bus, BusReader};
 use core::{
@@ -9,7 +10,7 @@ use core::{
     sync::atomic::{self, AtomicBool, AtomicU32},
     time::Duration,
 };
-use event::{Event, EVENTS_CAPACITY};
+use event::{Event, NewUnitTx, EVENTS_CAPACITY};
 use log::*;
 pub use network::Network;
 use rusqlite::Connection;
@@ -29,7 +30,7 @@ use node::{node_worker, MAX_HEADERS_PER_MSG};
 use crate::{
     cache::headers::HeadersCache,
     db::{self, initialize_db, metadata::DatabaseMeta, vault::DatabaseVault},
-    vault::VaultTx,
+    vault::{UnitTransaction, VaultTx},
 };
 
 pub mod event;
@@ -424,35 +425,97 @@ impl Indexer {
     fn process_block(&self, block: Block, height: u32) -> Result<(), Error> {
         let block_hash = block.block_hash();
         for (i, tx) in block.txdata.into_iter().enumerate() {
-            match VaultTx::from_tx(&tx) {
-                Err(err) => {
-                    if !err.is_definetely_not_vault() {
-                        error!("Got transaction {}, that possible vault related, but we failed to parse with: {}", tx.compute_wtxid(), err);
-                        //panic!("Stop here for debug");
-                    }
-                }
-                Ok(vtx) => {
-                    info!("New vault {} transaction: {}", vtx.action, vtx.txid);
-                    debug!("Found a vault transaction: {:#?}", vtx);
-
-                    let mut conn = self.database.lock().map_err(|_| ErrorKind::DatabaseLock)?;
-                    match conn.store_vault_tx(&vtx, block_hash, i, height, &tx) {
-                        Err(e) => {
-                            error!("Failed to store vault tx {} from block {block_hash} at height {height}, reason: {}", vtx.txid, e);
-                            //panic!("Stop here for debug");
-                        }
-                        Ok(meta) => {
-                            let mut events_bus = self
-                                .events_bus
-                                .lock()
-                                .map_err(|_| ErrorKind::EventsBusLock)?;
-                            events_bus.broadcast(Event::NewTransaction(meta));
-                        }
-                    }
-                }
+            // Detect vault transactions
+            if self.detect_vault_tx(block_hash, height, i, &tx)? {
+                continue;
             }
+            // Detect UNIT token transactions
+            self.detect_unit_tx(block_hash, height, i, &tx)?;
         }
         Ok(())
+    }
+
+    /// If given transaction is Vault related, store it inside the database
+    fn detect_vault_tx(
+        &self,
+        block_hash: BlockHash,
+        height: u32,
+        i: usize,
+        tx: &Transaction,
+    ) -> Result<bool, Error> {
+        match VaultTx::from_tx(&tx) {
+            Err(err) => {
+                if !err.is_definetely_not_vault() {
+                    error!("Got transaction {}, that possible vault related, but we failed to parse with: {err}", tx.compute_wtxid());
+                    //panic!("Stop here for debug");
+                }
+                Ok(false)
+            }
+            Ok(vtx) => {
+                info!("New vault {} transaction: {}", vtx.action, vtx.txid);
+                debug!("Found a vault transaction: {:#?}", vtx);
+
+                let mut conn = self.database.lock().map_err(|_| ErrorKind::DatabaseLock)?;
+                match conn.store_vault_tx(&vtx, block_hash, i, height, &tx) {
+                    Err(e) => {
+                        error!("Failed to store vault tx {} from block {block_hash} at height {height}, reason: {e}", vtx.txid);
+                        //panic!("Stop here for debug");
+                    }
+                    Ok(meta) => {
+                        let mut events_bus = self
+                            .events_bus
+                            .lock()
+                            .map_err(|_| ErrorKind::EventsBusLock)?;
+                        events_bus.broadcast(Event::NewTransaction(meta));
+                    }
+                }
+                Ok(true)
+            }
+        }
+    }
+
+    // If given transaction is UNIT related runestone (push 13), store it in database
+    fn detect_unit_tx(
+        &self,
+        block_hash: BlockHash,
+        height: u32,
+        i: usize,
+        tx: &Transaction,
+    ) -> Result<bool, Error> {
+        match UnitTransaction::from_tx(&tx) {
+            Err(err) => {
+                if !err.is_definetely_not_unit() {
+                    trace!("Got transaction {}, that possible UNIT related, but we failed to parse with error: {err}", tx.compute_txid());
+                    //panic!("Stop here for debug");
+                }
+                Ok(false)
+            }
+            Ok(utx) => {
+                info!("New UNIT transaction: {}", utx.txid);
+                debug!("Found a vault transaction: {:#?}", utx);
+
+                let mut conn = self.database.lock().map_err(|_| ErrorKind::DatabaseLock)?;
+                match conn.store_unit_tx(&tx, utx.unit_amount) {
+                    Err(e) => {
+                        error!("Failed to store vault tx {} from block {block_hash} at height {height}, reason: {e}", tx.compute_txid());
+                        //panic!("Stop here for debug");
+                    }
+                    Ok(_) => {
+                        let mut events_bus = self
+                            .events_bus
+                            .lock()
+                            .map_err(|_| ErrorKind::EventsBusLock)?;
+                        events_bus.broadcast(Event::NewUnitTransaction(NewUnitTx {
+                            utx,
+                            block_hash,
+                            block_pos: i,
+                            height,
+                        }));
+                    }
+                }
+                Ok(true)
+            }
+        }
     }
 }
 
