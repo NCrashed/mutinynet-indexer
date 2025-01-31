@@ -146,8 +146,8 @@ You should expect the following result:
       "op_return_output": 2,
       "version": "1_legacy",
       "action": "borrow",
-      "balance": 102006,
-      "oracle_price": 383153,
+      "balance": 383153,
+      "oracle_price": 102006,
       "oracle_timestamp": 1738116742,
       "liquidation_price": null,
       "liquidation_hash": null,
@@ -155,10 +155,10 @@ You should expect the following result:
       "height": 1810807,
       "tx_url": "https://mutinynet.com/tx/0f442831c3f1ac79d62d3c4ed2afef1f8d9c44a58f34f4b222e6abc7f6721e6f",
       "btc_custody": 11686787,
-      "unit_volume": -1971,
+      "unit_volume": 133861,
       "btc_volume": 0,
       "prev_tx": "https://mutinynet.com/tx/a96f34bffc5fb1427f28b707d1ee524b01c564da03c5ff7a2cdaaf4949a4d1e0"
-    }
+    },
   ]
 }
 ```
@@ -177,8 +177,8 @@ Expected response:
       "op_return_output": 2,
       "version": "1_legacy",
       "action": "deposit",
-      "balance": 104274,
-      "oracle_price": 13725,
+      "balance": 13725,
+      "oracle_price": 104274,
       "oracle_timestamp": 1738202039,
       "liquidation_price": null,
       "liquidation_hash": null,
@@ -186,7 +186,7 @@ Expected response:
       "height": 1813556,
       "tx_url": "https://mutinynet.com/tx/4012016d9527bfb3bef9c51dded9123d812f9c259961d29ef7e5bf17e358d741",
       "btc_custody": 2810335,
-      "unit_volume": 9165,
+      "unit_volume": 0,
       "btc_volume": 1209359,
       "prev_tx": "https://mutinynet.com/tx/cedd95445d2cc549788ca471cda405d78512380001e5ed496accdf812fb969ff"
     }
@@ -208,15 +208,15 @@ Result:
 {
   "ActionHistory": [
     {
-      "timestamp_start": 1729123200,
-      "unit_volume": 130385,
-      "btc_volume": 6010000
+      "timestamp_start": 1729296000,
+      "unit_volume": 100000,
+      "btc_volume": 5000000
     },
     {
-      "timestamp_start": 1729728000,
-      "unit_volume": 1524555,
-      "btc_volume": 53255112
-    },
+      "timestamp_start": 1729468800,
+      "unit_volume": 23062,
+      "btc_volume": 1010000
+    }
   ]
 }
 ```
@@ -228,7 +228,7 @@ Result:
 ```
 Result:
 ```json
-{"OveallVolume":{"btc_volume":12680920450,"unit_volume":73485324}}
+{"OverallVolume":{"btc_volume":28795629018,"unit_volume":50670242979}}
 ```
 Note: the withdraw volumes are subtracted from the total volume.
 
